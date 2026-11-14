@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      # ADK 与 genai 必须同向升级，单独升容易编译不过。
+      adk-stack:
+        patterns:
+          - "google.golang.org/adk*"
+          - "google.golang.org/genai"
+      # 其余间接依赖一次升完，避免 PR 洪水。
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

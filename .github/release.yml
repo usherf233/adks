@@ -1,0 +1,19 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: 破坏性变更
+      labels: [breaking]
+    - title: 新功能
+      labels: [enhancement, feature]
+    - title: 修复
+      labels: [bug, fix]
+    - title: 导出与校验
+      labels: [export, verify, codegen]
+    - title: 文档
+      labels: [documentation, docs]
+    - title: 依赖与构建
+      labels: [dependencies, ci]
+    - title: 其它
+      labels: ["*"]
