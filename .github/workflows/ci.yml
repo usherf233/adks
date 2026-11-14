@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build · vet · test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  build-binary:
+    name: embed check
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 二进制能构建出来，才说明 web/ kit/ manifest/ 的 embed 是完整的。
+      - name: build binary
+        run: go build -trimpath -ldflags "-X main.version=ci" -o adks ./cmd/adks
+
+      - name: smoke test
+        run: |
+          ./adks version
+          ./adks serve -port 17788 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:17788/api/health >/dev/null; then
+              echo "health ok"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "health check timed out"
+          exit 1

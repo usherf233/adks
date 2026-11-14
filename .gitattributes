@@ -1,0 +1,22 @@
+# 统一换行：仓库内一律 LF，Windows 检出时只对 .bat/.cmd 用 CRLF
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制
+*.exe binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# 不要参与语言统计
+*.svg linguist-documentation
+docs/** linguist-documentation
+designs/** linguist-documentation

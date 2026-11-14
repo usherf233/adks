@@ -1,0 +1,59 @@
+name: Bug 报告
+description: 有东西跑不对——崩溃、报错、导出的工程编不过
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先确认：`go build ./... && go vet ./... && go test -race ./...` 是否通过。
+        如果只是导出的工程编不过，请附上 manifest 和 `verify` 的原始输出。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 实际行为，以及你期望的行为。
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. adks serve
+        2. 新建项目，provider 选 openai
+        3. 点 verify
+        4. 看到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: manifest
+    attributes:
+      label: agent.yaml（脱敏后）
+      description: 删掉密钥、内网地址、业务指令等敏感内容。
+      render: yaml
+
+  - type: textarea
+    id: output
+    attributes:
+      label: 报错输出
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: adks 版本
+      description: 输出 `adks version` 的结果；源码运行就写 commit hash。
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: 操作系统、Go 版本、浏览器（如果是 UI 问题）。
+      placeholder: Windows 11 / Go 1.27.1 / Edge 141
+    validations:
+      required: true

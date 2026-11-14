@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 设计台账
+    url: https://github.com/usherf233/adks/blob/master/designs/adks-harness-design-v1.md
+    about: 需求规格、关键决策与已知未知区，先看这里再提需求。
