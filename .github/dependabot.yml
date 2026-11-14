@@ -22,5 +22,10 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "ci"
+    groups:
+      # 所有 action 合成一个 PR，否则每个 action 各开一个，噪音太大。
+      actions:
+        patterns: ["*"]
