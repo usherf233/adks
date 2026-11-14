@@ -8,48 +8,79 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  test:
+    name: test before shipping
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          fetch-depth: 0
+          go-version-file: go.mod
+          cache: true
+      - run: go test -count=1 ./...
 
-      - uses: actions/setup-go@v5
+  # 每个目标独立 job：并行编译，且各自复用模块缓存，
+  # 比在一个 job 里串行交叉编译五个平台快得多。
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, archive: tar.gz }
+          - { goos: linux, goarch: arm64, archive: tar.gz }
+          - { goos: darwin, goarch: amd64, archive: tar.gz }
+          - { goos: darwin, goarch: arm64, archive: tar.gz }
+          - { goos: windows, goarch: amd64, archive: zip }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: test before shipping
-        run: go test -count=1 ./...
-
-      - name: build matrix
+      - name: build
         env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            os="${target%/*}"
-            arch="${target#*/}"
-            name="adks-${os}-${arch}"
-            if [ "$os" = "windows" ]; then
-              bin="$name.exe"
-            else
-              bin="$name"
-            fi
+          name="adks-${GOOS}-${GOARCH}"
+          bin="$name"
+          if [ "$GOOS" = "windows" ]; then bin="$name.exe"; fi
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$bin" ./cmd/adks
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip -q "$name.zip" "$bin"
+          else
+            tar -czf "$name.tar.gz" "$bin"
+          fi
+          rm -f "$bin"
 
-            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
-              go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/$bin" ./cmd/adks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adks-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error
+          retention-days: 7
 
-            if [ "$os" = "windows" ]; then
-              (cd dist && zip -q "$name.zip" "$bin" && rm "$bin")
-            else
-              (cd dist && tar -czf "$name.tar.gz" "$bin" && rm "$bin")
-            fi
-          done
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

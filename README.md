@@ -55,6 +55,10 @@ flowchart LR
 
 ## 快速开始
 
+**方式一：下载预编译二进制** —— 见 [Releases](https://github.com/usherf233/adks/releases)，linux / darwin / windows 五个平台，解压即用。
+
+**方式二：从源码构建**
+
 ```bash
 git clone git@github.com:usherf233/adks.git
 cd adks
@@ -62,7 +66,7 @@ go build -o adks ./cmd/adks
 ./adks serve                      # → http://127.0.0.1:7788
 ```
 
-或者：
+**方式三：`go install`**
 
 ```bash
 go install github.com/usherf233/adks/cmd/adks@latest
