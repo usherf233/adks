@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // schemaFromParams builds the tool's input schema from the manifest parameters.

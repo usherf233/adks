@@ -13,7 +13,7 @@ import (
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 	"google.golang.org/genai"
 
-	"github.com/adks-dev/adks/kit"
+	"github.com/usherf233/adks/kit"
 )
 
 // converse runs a user turn to completion, resuming as many times as the run asks

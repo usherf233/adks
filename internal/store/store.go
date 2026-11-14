@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // ErrNotFound marks "the project is not there", so the HTTP layer can map it to

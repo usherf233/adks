@@ -12,7 +12,7 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/workflow"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // graphBuilder compiles spec.graph.

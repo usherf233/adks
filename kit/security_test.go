@@ -12,7 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 func TestHTTPTool5xxKeepsResponseBodyReadable(t *testing.T) {

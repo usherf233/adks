@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 func testProject(t *testing.T) *manifest.Project {

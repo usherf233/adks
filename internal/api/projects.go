@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/adks-dev/adks/internal/store"
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/internal/store"
+	"github.com/usherf233/adks/manifest"
 )
 
 func (s *Server) listProjects(w http.ResponseWriter, _ *http.Request) {

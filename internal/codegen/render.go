@@ -21,7 +21,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // ModulePath is the import path an exported project declares.
@@ -29,7 +29,7 @@ import (
 // It is identical to the builder's, which is what lets kit's own imports resolve
 // inside the exported module without rewriting a single import line. The exported
 // module is self-contained, so nothing is ever fetched from this path.
-const ModulePath = "github.com/adks-dev/adks"
+const ModulePath = "github.com/usherf233/adks"
 
 // Bundle is an exported project in memory: relative path to content.
 type Bundle struct {

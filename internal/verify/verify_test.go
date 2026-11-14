@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adks-dev/adks/internal/codegen"
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/internal/codegen"
+	"github.com/usherf233/adks/manifest"
 )
 
 // TestSmokeStartsExportedBinary pins the launcher argument format. ADK v2's

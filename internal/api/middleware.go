@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // guard is the browser-facing boundary. Binding to loopback does not protect a

@@ -21,7 +21,7 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/session/database"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // NewSessionService builds the session backend. Every SQL backend runs

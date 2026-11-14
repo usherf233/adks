@@ -3,7 +3,7 @@ package kit
 import (
 	"testing"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // The validator and the builder each hold a closed set of builtin tools. They

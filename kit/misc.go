@@ -12,7 +12,7 @@ import (
 	"google.golang.org/adk/v2/session/compaction"
 	"google.golang.org/adk/v2/tool"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // multiToolset merges several toolsets into one, preserving the order it was

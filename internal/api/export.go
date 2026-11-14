@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adks-dev/adks/internal/codegen"
-	"github.com/adks-dev/adks/internal/verify"
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/internal/codegen"
+	"github.com/usherf233/adks/internal/verify"
+	"github.com/usherf233/adks/manifest"
 )
 
 // filesView is a preview of what an export would contain.

@@ -13,7 +13,7 @@ import (
 	"google.golang.org/adk/v2/model/openaimodel"
 	"google.golang.org/genai"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // newModel builds the LLM client. Credentials are read here and only here, so a

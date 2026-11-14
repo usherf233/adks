@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	adks "github.com/adks-dev/adks"
-	"github.com/adks-dev/adks/internal/api"
-	"github.com/adks-dev/adks/internal/store"
+	adks "github.com/usherf233/adks"
+	"github.com/usherf233/adks/internal/api"
+	"github.com/usherf233/adks/internal/store"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".

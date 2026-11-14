@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/adks-dev/adks/internal/store"
+	"github.com/usherf233/adks/internal/store"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

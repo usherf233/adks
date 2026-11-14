@@ -8,9 +8,9 @@ import (
 
 	"google.golang.org/adk/v2/runner"
 
-	"github.com/adks-dev/adks/internal/store"
-	"github.com/adks-dev/adks/kit"
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/internal/store"
+	"github.com/usherf233/adks/kit"
+	"github.com/usherf233/adks/manifest"
 )
 
 // layerCache keeps one compiled project alive between messages.

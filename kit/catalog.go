@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/adk/v2/tool"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // buildTools assembles the catalog. Both slices are returned because a toolset

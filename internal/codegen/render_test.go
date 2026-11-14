@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 func TestGoVersionFromMod(t *testing.T) {

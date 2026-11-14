@@ -1,4 +1,4 @@
-module github.com/adks-dev/adks
+module github.com/usherf233/adks
 
 go 1.27.1
 

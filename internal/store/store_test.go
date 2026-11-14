@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 func newStore(t *testing.T) *Store {

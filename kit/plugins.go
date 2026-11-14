@@ -14,7 +14,7 @@ import (
 	"google.golang.org/adk/v2/plugin/retryandreflect"
 	"google.golang.org/adk/v2/tool"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // newPlugins builds the plugin list referenced by the manifest. Unknown kinds are

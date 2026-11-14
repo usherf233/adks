@@ -15,7 +15,7 @@ import (
 	"google.golang.org/adk/v2/tool/mcptoolset"
 	"google.golang.org/genai"
 
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/manifest"
 )
 
 // MCPDeps is what an MCP connection needs from its host process.

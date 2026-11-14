@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adks-dev/adks/kit"
-	"github.com/adks-dev/adks/manifest"
+	"github.com/usherf233/adks/kit"
+	"github.com/usherf233/adks/manifest"
 )
 
 // probeModel makes one tiny real call, because a key that parses is not the same
