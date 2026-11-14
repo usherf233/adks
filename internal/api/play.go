@@ -42,7 +42,8 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request) {
 
 	rnr, p, release, err := s.layers.Get(r.Context(), slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		// A missing project is 404; a manifest that does not compile is a 400.
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	defer release()

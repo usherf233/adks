@@ -2,11 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/adks-dev/adks/internal/store"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -19,6 +22,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]any{"error": err.Error()})
+}
+
+// writeLoadErr is the one mapping every project endpoint agrees on: a project
+// that does not exist is 404, whatever else went wrong keeps the status the
+// endpoint would have used before. getProject is the deliberate exception — it
+// turns a parse failure into 200 so the editor can open and fix the manifest.
+func writeLoadErr(w http.ResponseWriter, err error, fallback int) {
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	writeErr(w, fallback, err)
 }
 
 func readJSON(r *http.Request, v any) error {

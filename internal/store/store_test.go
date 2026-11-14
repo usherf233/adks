@@ -1,6 +1,9 @@
 package store
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -154,6 +157,55 @@ func TestStoreRejectsUnsafeSlug(t *testing.T) {
 		if _, _, err := s.SaveRaw(slug, []byte("x")); err == nil {
 			t.Errorf("SaveRaw(%q) should be rejected", slug)
 		}
+	}
+}
+
+func TestMissingProjectIsNotFound(t *testing.T) {
+	s := newStore(t)
+	if _, _, err := s.Load("ghost"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load of a missing project: err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.Versions("ghost"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Versions of a missing project: err = %v, want ErrNotFound", err)
+	}
+	if err := s.Delete("ghost"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Delete of a missing project: err = %v, want ErrNotFound", err)
+	}
+	if _, _, err := s.SaveRaw("ghost", []byte("metadata: {slug: ghost}")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SaveRaw must not resurrect a deleted project: err = %v, want ErrNotFound", err)
+	}
+	if _, _, err := s.Rollback("ghost", "20260101T000000.000000000Z.yaml"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Rollback of a missing project: err = %v, want ErrNotFound", err)
+	}
+}
+
+// A project whose manifest does not parse must never report ErrNotFound: the
+// editor is expected to open it and fix it, not to 404.
+func TestBrokenManifestIsNotNotFound(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.Create("broken", "Broken"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.ProjectDir("broken"), "agent.yaml"), []byte("no: [such: field]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Load("broken"); err == nil {
+		t.Fatal("expected a parse error")
+	} else if errors.Is(err, ErrNotFound) {
+		t.Fatalf("a broken manifest exists and must not be ErrNotFound: %v", err)
+	}
+}
+
+func TestReadVersionMissingSnapshotIsNotFound(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.Create("demo-app", "Demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadVersion("demo-app", "20260101T000000.000000000Z.yaml"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.ReadVersion("demo-app", `..\..\evil.yaml`); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("a traversal attempt must be a plain rejection, got %v", err)
 	}
 }
 

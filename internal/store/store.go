@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,13 @@ import (
 
 	"github.com/adks-dev/adks/manifest"
 )
+
+// ErrNotFound marks "the project is not there", so the HTTP layer can map it to
+// a 404 instead of guessing from the message. A project whose manifest does not
+// parse still exists and is deliberately not reported this way: the editor must
+// be able to open it and fix it. The version index uses it too, for a snapshot
+// name that is not in the list.
+var ErrNotFound = errors.New("not found")
 
 const (
 	manifestFile = "agent.yaml"
@@ -164,9 +172,18 @@ func (s *Store) Load(slug string) (*manifest.Project, []byte, error) {
 	if err := checkSlug(slug); err != nil {
 		return nil, nil, err
 	}
-	path := filepath.Join(s.ProjectDir(slug), manifestFile)
-	raw, err := os.ReadFile(path)
+	dir := s.ProjectDir(slug)
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("load project %q: %w", slug, ErrNotFound)
+		}
+		return nil, nil, fmt.Errorf("load project %q: %w", slug, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, manifestFile))
 	if err != nil {
+		// The directory exists, so the project exists: a missing or unreadable
+		// manifest is a parse-level problem the editor must be able to open,
+		// never a 404.
 		return nil, nil, fmt.Errorf("load project %q: %w", slug, err)
 	}
 	p, err := manifest.Decode(raw)
@@ -232,7 +249,12 @@ func (s *Store) saveLocked(slug string, p *manifest.Project, snapshot bool) (*ma
 	issues := manifest.Validate(p)
 
 	dir := s.ProjectDir(slug)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			// Save updates an existing project; Create is the only way in. A
+			// PUT must not resurrect a project the user deleted.
+			return p, issues, fmt.Errorf("save project %q: %w", slug, ErrNotFound)
+		}
 		return p, issues, fmt.Errorf("save project %q: %w", slug, err)
 	}
 	if snapshot {
@@ -307,10 +329,17 @@ func pruneVersions(dir string, keep int) error {
 	return nil
 }
 
-// Versions lists snapshot names, newest first.
+// Versions lists snapshot names, newest first. A project without snapshots is
+// an empty list; a project that does not exist is ErrNotFound.
 func (s *Store) Versions(slug string) ([]string, error) {
 	if err := checkSlug(slug); err != nil {
 		return nil, err
+	}
+	if _, err := os.Stat(s.ProjectDir(slug)); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("versions of %q: %w", slug, ErrNotFound)
+		}
+		return nil, fmt.Errorf("versions of %q: %w", slug, err)
 	}
 	dir := filepath.Join(s.ProjectDir(slug), "versions")
 	entries, err := os.ReadDir(dir)
@@ -338,7 +367,14 @@ func (s *Store) ReadVersion(slug, name string) ([]byte, error) {
 	if strings.ContainsAny(name, `/\`) {
 		return nil, fmt.Errorf("invalid version name %q", name)
 	}
-	return os.ReadFile(filepath.Join(s.ProjectDir(slug), "versions", name))
+	raw, err := os.ReadFile(filepath.Join(s.ProjectDir(slug), "versions", name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("version %q of %q: %w", name, slug, ErrNotFound)
+		}
+		return nil, err
+	}
+	return raw, nil
 }
 
 // Rollback restores a snapshot. The current manifest is snapshotted first so a
@@ -365,14 +401,22 @@ func (s *Store) Rollback(slug, name string) (*manifest.Project, []manifest.Issue
 	return s.saveLocked(slug, p, false)
 }
 
-// Delete removes a project directory.
+// Delete removes a project directory. Deleting a project that does not exist
+// is an error, not a no-op: silently "succeeding" hides a stale UI reference.
 func (s *Store) Delete(slug string) error {
 	if err := checkSlug(slug); err != nil {
 		return err
 	}
 	unlock := s.lock(slug)
 	defer unlock()
-	if err := os.RemoveAll(s.ProjectDir(slug)); err != nil {
+	dir := s.ProjectDir(slug)
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("delete project %q: %w", slug, ErrNotFound)
+		}
+		return fmt.Errorf("delete project %q: %w", slug, err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("delete project %q: %w", slug, err)
 	}
 	return s.reindex()

@@ -17,7 +17,7 @@ func (s *Server) probeModel(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	start := time.Now()
@@ -46,7 +46,7 @@ func (s *Server) probeSQL(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	// Only the saved manifest decides which database is probed. Letting the
@@ -73,7 +73,7 @@ func (s *Server) probeMCP(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	var req struct {

@@ -43,7 +43,7 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	if p.Spec.Mode != manifest.ModeGraph || p.Spec.Graph == nil {

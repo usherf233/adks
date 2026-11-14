@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -160,5 +162,86 @@ func TestPlayHubCloseDropsPending(t *testing.T) {
 	h.Close()
 	if h.deliver("c1", true, "project-a", "session-a") {
 		t.Fatal("a closed hub still delivered a decision")
+	}
+}
+
+// One rule everywhere: a project that does not exist is a 404, not a 200 with
+// an error field and not a 400 that looks like a bad request.
+func TestMissingProjectIs404OnEveryEndpoint(t *testing.T) {
+	s := guardTestServer(t)
+	for _, tc := range []struct {
+		method, path, body string
+	}{
+		{"GET", "/api/projects/ghost", ""},
+		{"PUT", "/api/projects/ghost", `{"manifestYaml":"metadata: {slug: ghost}"}`},
+		{"DELETE", "/api/projects/ghost", ""},
+		{"GET", "/api/projects/ghost/versions", ""},
+		{"POST", "/api/projects/ghost/rollback", `{"version":"x.yaml"}`},
+		{"GET", "/api/projects/ghost/graph", ""},
+		{"POST", "/api/projects/ghost/probe/model", `{}`},
+		{"POST", "/api/projects/ghost/verify", `{}`},
+		{"GET", "/api/projects/ghost/files", ""},
+	} {
+		var body *strings.Reader
+		if tc.body == "" {
+			body = strings.NewReader("")
+		} else {
+			body = strings.NewReader(tc.body)
+		}
+		req := httptest.NewRequest(tc.method, tc.path, body)
+		req.Host = "example.com"
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s %s: got %d %q, want 404", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// The editor must open a manifest that does not parse, so GET is the endpoint
+// that answers 200 with a loadError instead of failing.
+func TestBrokenManifestStillOpens(t *testing.T) {
+	s := guardTestServer(t)
+	if _, err := s.store.Create("broken", "Broken"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.store.ProjectDir("broken"), "agent.yaml"), []byte("no: [such: field]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/broken", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a broken manifest must still open: got %d %q", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"loadError"`) {
+		t.Fatalf("expected loadError in the response, got %q", w.Body.String())
+	}
+
+	// ...but every endpoint that needs a compiled project says 400.
+	for _, tc := range []struct{ method, path, body string }{
+		{"GET", "/api/projects/broken/graph", ""},
+		{"POST", "/api/projects/broken/probe/model", `{}`},
+		{"GET", "/api/projects/broken/files", ""},
+	} {
+		var body *strings.Reader
+		if tc.body == "" {
+			body = strings.NewReader("")
+		} else {
+			body = strings.NewReader(tc.body)
+		}
+		req := httptest.NewRequest(tc.method, tc.path, body)
+		req.Host = "example.com"
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s %s on a broken manifest: got %d %q, want 400", tc.method, tc.path, w.Code, w.Body.String())
+		}
 	}
 }

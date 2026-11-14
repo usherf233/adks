@@ -30,7 +30,7 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	b, err := codegen.Render(p, s.seed)
@@ -96,7 +96,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	b, err := codegen.Render(p, s.seed)
@@ -159,7 +159,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 
 	p, _, err := s.store.Load(slug)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	if err := validateForExport(p); err != nil {

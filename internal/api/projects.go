@@ -66,8 +66,13 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	p, raw, err := s.store.Load(slug)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, err)
+			return
+		}
 		// A manifest that does not parse still has to be openable: that is
-		// precisely when the user needs the editor.
+		// precisely when the user needs the editor. Only a missing project is
+		// a 404.
 		writeJSON(w, http.StatusOK, projectView{
 			Slug:         slug,
 			LoadError:    err.Error(),
@@ -116,7 +121,7 @@ func (s *Server) putProject(w http.ResponseWriter, r *http.Request) {
 		p, issues, err = s.store.SaveRaw(slug, []byte(req.ManifestYAML))
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeLoadErr(w, err, http.StatusInternalServerError)
 		return
 	}
 	if p == nil {
@@ -140,7 +145,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	s.layers.Invalidate(slug)
 	if err := s.store.Delete(slug); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeLoadErr(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -149,7 +154,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := s.store.Versions(slugOf(r))
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeLoadErr(w, err, http.StatusInternalServerError)
 		return
 	}
 	if versions == nil {
@@ -169,7 +174,7 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	p, issues, err := s.store.Rollback(slug, req.Version)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
 	if p == nil {
