@@ -158,7 +158,7 @@ make check      # build + vet + test -race
 make run        # 构建并启动
 ```
 
-等价的手工命令：
+Windows 上没装 make 也没关系，等价的手工命令：
 
 ```bash
 go build ./...
