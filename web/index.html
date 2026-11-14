@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>adks · ADK Go 脚手架</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%236f8dff'/%3E%3Cpath d='M10 21l6-10 6 10' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script>
+  // Resolve the theme before first paint so there is no flash of the wrong one.
+  (function () {
+    var saved = localStorage.getItem('adks.theme');
+    var dark = saved ? saved === 'dark' : !window.matchMedia('(prefers-color-scheme: light)').matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  })();
+</script>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7c9cff"/><stop offset="1" stop-color="#a78bfa"/>
+          </linearGradient>
+        </defs>
+        <rect x="1" y="1" width="22" height="22" rx="7" fill="url(#lg)"/>
+        <path d="M7.5 16.5L12 7.5l4.5 9" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="brand-name">adks</span>
+      <span class="brand-tag">Google ADK · Go 脚手架</span>
+    </div>
+
+    <button class="search-trigger" id="btn-search" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.4 10.4L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <span>搜索项目</span>
+      <kbd>⌘K</kbd>
+    </button>
+
+    <div class="topbar-actions">
+      <span class="path-chip mono" id="home-path"></span>
+      <button class="icon-btn" id="btn-theme" type="button" title="切换深浅色">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6v1.6M8 12.8v1.6M2.6 8H1M15 8h-1.6M3.9 3.9L2.8 2.8M13.2 13.2l-1.1-1.1M12.1 3.9l1.1-1.1M2.8 13.2l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+      </button>
+      <button class="btn primary" id="btn-new" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        新建项目
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel projects">
+      <div class="panel-head">
+        <h2>项目</h2>
+        <span class="badge" id="project-count">0</span>
+      </div>
+      <div class="side-search">
+        <input id="project-filter" placeholder="过滤项目" spellcheck="false" autocomplete="off">
+      </div>
+      <ul id="project-list" class="project-list"></ul>
+      <div class="panel-foot">
+        <input id="new-slug" placeholder="slug，例如 support-bot" spellcheck="false" autocomplete="off">
+        <button class="btn primary" id="btn-create" type="button">创建</button>
+      </div>
+    </aside>
+
+    <section class="panel editor">
+      <div class="project-head" id="project-head" hidden>
+        <div class="ph-title">
+          <h1 id="proj-name">—</h1>
+          <button class="slug-chip" id="btn-copy-slug" type="button" title="复制 slug">
+            <span class="mono" id="proj-slug">—</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 3.5H4.6c-.6 0-1.1.5-1.1 1.1v5.9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="ph-stats" id="proj-stats"></div>
+      </div>
+
+      <div class="panel-head editor-head">
+        <div class="tabs" id="tabs">
+          <button data-tab="form" class="tab active" type="button">配置</button>
+          <button data-tab="yaml" class="tab" type="button">YAML</button>
+          <button data-tab="export" class="tab" type="button">导出</button>
+          <button data-tab="versions" class="tab" type="button">版本</button>
+        </div>
+        <div class="head-actions">
+          <span id="save-state" class="save-state"></span>
+          <button class="btn ghost danger" id="btn-delete" type="button">删除</button>
+          <button class="btn ghost" id="btn-reload" type="button" title="丢弃未保存的修改">还原</button>
+          <button class="btn primary" id="btn-save" type="button" title="保存（⌘S）">保存</button>
+        </div>
+      </div>
+
+      <div class="editor-body" id="editor-body">
+        <div class="empty" id="editor-empty">
+          <div class="empty-mark">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/><path d="M24 18v10M19 23h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <h3>还没有打开项目</h3>
+          <p>左侧选一个项目，或输入 slug 新建。建好后可以直接在这里配模型、工具和存储，再去右侧试跑——不需要写代码。</p>
+        </div>
+
+        <div class="tab-pane" data-pane="form" hidden>
+          <div id="form-root"></div>
+        </div>
+
+        <div class="tab-pane" data-pane="yaml" hidden>
+          <div class="editor-note">
+            <strong>YAML 是唯一的真相源。</strong>表单保存时写回这里；直接编辑后保存会做严格解析，未知字段视为错误。
+          </div>
+          <textarea id="yaml-input" spellcheck="false" wrap="off"></textarea>
+          <div class="yaml-meta" id="yaml-meta"></div>
+        </div>
+
+        <div class="tab-pane" data-pane="export" hidden>
+          <div class="export-grid">
+            <div class="card">
+              <div class="card-head">
+                <span class="card-icon ok">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 8.4l3 3 6.2-6.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <h3>确定性校验</h3>
+              </div>
+              <p class="muted">编译产物、静态检查、冒烟启动。三档全过才建议导出，不靠模型裁判。</p>
+              <div class="row">
+                <label class="check"><input type="checkbox" id="verify-smoke" checked> 含冒烟启动</label>
+                <button class="btn" id="btn-verify" type="button">运行校验</button>
+              </div>
+              <div id="verify-result" class="result"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <span class="card-icon accent">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.6 7.2L8 10.6l3.4-3.4M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <h3>导出源码</h3>
+              </div>
+              <p class="muted">产出一个自包含的 Go 模块：manifest + kit + main.go + go.mod，脱离本仓库可直接 build。</p>
+              <div class="row">
+                <button class="btn" id="btn-export-dir" type="button">导出到目录</button>
+                <button class="btn primary" id="btn-export-zip" type="button">下载 zip</button>
+              </div>
+              <div id="export-result" class="result"></div>
+            </div>
+
+            <div class="card wide">
+              <div class="card-head">
+                <span class="card-icon">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 4.2c0-.8.7-1.4 1.5-1.4h2.3l1.3 1.5h5.1c.8 0 1.5.6 1.5 1.4v5.6c0 .8-.7 1.4-1.5 1.4H3.9c-.8 0-1.5-.6-1.5-1.4V4.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+                </span>
+                <h3>生成文件</h3>
+                <span class="muted mono" id="file-summary"></span>
+              </div>
+              <div id="file-list" class="file-tree"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-pane" data-pane="versions" hidden>
+          <div class="versions-wrap">
+            <div class="editor-note">每次保存留一份快照，最多 50 份。回滚会先把当前状态存一份，再恢复所选版本。</div>
+            <div id="version-list" class="version-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="statusbar">
+        <div id="issues" class="issues"></div>
+      </footer>
+    </section>
+
+    <aside class="panel play">
+      <div class="panel-head">
+        <h2>试跑</h2>
+        <div class="head-actions">
+          <span id="play-state" class="save-state"></span>
+          <button class="btn ghost small" id="btn-reset-session" type="button" title="开一个新会话">新会话</button>
+          <button class="icon-btn play-toggle" id="btn-play-toggle" type="button" title="收起 / 展开">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6.5L8 11l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="chat" class="chat"></div>
+      <div class="composer">
+        <textarea id="msg" placeholder="发一条消息，Enter 发送" autocomplete="off"></textarea>
+        <button class="btn primary" id="btn-send" type="button">发送</button>
+      </div>
+    </aside>
+  </main>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
