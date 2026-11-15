@@ -346,3 +346,30 @@ cases:
 静默 35 秒里两帧按时到达——这正是原来会断的窗口。
 
 另外 `TestSSEWriterSurvivesConcurrentWrites` 让两个 goroutine 各写 200 次，然后逐行 `json.Unmarshal` 每个 `data:` 帧——交错写出来的帧不是合法 JSON，这条能真抓到问题；`-race` 亦绿。
+
+---
+
+## 13. 第八轮：stats.jsonl 的边界（2026-11-16 凌晨）
+
+### 13.1 与审计日志的不同选择
+
+审计日志按**字节**轮转、只留一代（`audit.jsonl` → `.1`），因为它是事件流，用途是事后追查最近发生了什么。
+
+stats 是**账本**，有人会读它算钱。按字节轮转意味着"某一天你的成本面板突然少一半"，这比没有面板更糟。所以规则改成 **超过 1MB 时保留最近 3000 轮**：
+
+- 约 250 字节/轮 → 1MB 大约几千轮，触发不频繁
+- trim 是原子替换（临时文件 + rename），读者要么看到旧文件要么看到新文件
+- 每次写入多一次 `stat`（便宜）；逐次统计行数则不便宜，所以不在每次追加时数行
+
+### 13.2 失败语义
+
+trim 失败就**保持原样，下一轮再试**：账本丢一行比多占几百 KB 严重。Windows 上 rename 可能与仍在读文件的读者撞车，这正是把它当成"稍后重试"而不是错误上报的原因。
+
+互斥锁覆盖整个追加+trim 流程，否则两个 goroutine 会各自基于不同快照重写文件。
+
+### 13.3 验证
+
+- `TestStatSinkKeepsTheNewestLines`：写 12 行、上限压到 3 行，断言最后一行是最新那轮
+- `TestStatSinkTrimKeepsFileReadable`：trim 后每一行仍能 `json.Unmarshal`
+- `TestStatSinkConcurrentWritesStayWhole`：4 个 goroutine × 50 次写入叠加 trim，逐行解析无损坏
+- `TestStatsReadsWhatSurvivedTrim`：读端口在 trim 之后的文件上仍然给出正确的轮数与 token 合计

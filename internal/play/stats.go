@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,8 +29,37 @@ type statLine struct {
 
 // statSink serialises appends to stats files. Two sessions of the same project can
 // finish at once, and an interleaved append would corrupt a line.
+//
+// It also keeps the file from growing forever. The audit log rotates by generation
+// because it is an event log; this file is a ledger someone reads, so the honest
+// rule is "keep the newest N turns" rather than "keep the newest 8MB and drop the
+// rest" — a cost panel whose history silently halves when a byte counter trips
+// would be worse than no panel.
 type statSink struct {
 	mu sync.Mutex
+	// maxBytes and keepLines are fields so a test can shrink them; zero picks the
+	// package defaults.
+	maxBytes  int64
+	keepLines int
+}
+
+const (
+	// maxStatsBytes is the size at which a trim is worth doing. At roughly 250
+	// bytes per turn this is several thousand turns of history.
+	maxStatsBytes = 1 << 20
+	// keepStatsLines is what survives a trim: about a year of daily use.
+	keepStatsLines = 3000
+)
+
+func (s *statSink) limits() (int64, int) {
+	maxBytes, keep := s.maxBytes, s.keepLines
+	if maxBytes <= 0 {
+		maxBytes = maxStatsBytes
+	}
+	if keep <= 0 {
+		keep = keepStatsLines
+	}
+	return maxBytes, keep
 }
 
 func (s *statSink) write(path string, line statLine) {
@@ -46,8 +76,56 @@ func (s *statSink) write(path string, line statLine) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	_, _ = f.Write(append(buf, '\n'))
+	_, werr := f.Write(append(buf, '\n'))
+	_ = f.Close()
+	if werr != nil {
+		return
+	}
+
+	maxBytes, keep := s.limits()
+	// One stat per turn is cheap; counting lines on every append would not be.
+	if info, err := os.Stat(path); err == nil && info.Size() > maxBytes {
+		// A failed trim leaves the file as it was and is retried on the next turn:
+		// losing the ledger is worse than a few extra kilobytes.
+		trimTail(path, keep)
+	}
+}
+
+// trimTail rewrites the file with only its newest keep lines.
+//
+// The replace is atomic, so a reader either sees the old file or the new one. On
+// Windows the rename can lose a race with a reader that still has the file open;
+// that is why the caller treats a failure as "try again later" rather than an
+// error worth surfacing.
+func trimTail(path string, keep int) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) <= keep {
+		return
+	}
+	tail := append(lines[len(lines)-keep:], "")
+	_ = writeFileAtomic(path, []byte(strings.Join(tail, "\n")))
+}
+
+// writeFileAtomic replaces path with data, via a temp file in the same directory.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".stats-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }
 
 // Percentiles is a distribution summarised three ways. p50 is what a typical turn
