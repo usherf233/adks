@@ -314,3 +314,35 @@ cases:
 
 - 运行是同步的，用例多会等很久；上限 20 条
 - 没有"历史通过率"曲线，也没有 CI 钩子——导出物里有用例文件，但还没有 `adks eval` 子命令在导出目录里跑
+
+---
+
+## 12. 第七轮：SSE 保活（2026-11-16 凌晨）
+
+### 12.1 问题
+
+`playTurn` 只在有事件时 `Flush`。一次慢工具调用、或最长 120 秒的等待人工确认，期间**零字节**。
+
+服务端自身没问题（`WriteTimeout: 0`，写法是对的），但中间层不会等：nginx 默认 `proxy_read_timeout 60s`，云 LB 常见 30–60s。而产品在这个阶段刚把 `host` / `pathPrefix` / Dockerfile 修好——等于在鼓励部署，然后一部署就断。这是典型的"本地好好的、上线才炸"。
+
+### 12.2 做法
+
+- `sseWriter`：写操作串行化。事件来自回合，心跳来自 ticker，而 `ResponseWriter` 不支持并发写；字节交错会把帧写坏，浏览器会静默丢弃。写失败一次就标记 `dead`，避免客户端走掉之后每个事件都报一次错。
+- `keepAlive`：每 15 秒发 `: keep-alive\n\n`（SSE 注释帧，客户端忽略、代理算流量）。15s 是对着 60s 超时留三次机会，不是对着我们自己的节奏。
+- handler 里 `close(stop)` 后 **等 goroutine 退出**再返回：handler 返回后再写 `ResponseWriter` 会 panic。
+
+### 12.3 验证（两层）
+
+1. **连接级**：`httptest.NewServer` 起真 socket，handler 静默 90ms 后发一个事件，客户端用 `bufio.Scanner` 读——断言至少 3 个注释帧、1 个数据帧、且注释帧先到。时间轴压缩到毫秒，但走的是真 TCP。
+2. **端到端**：写一个会 `sleep 35` 秒的本地 OpenAI 兼容桩，项目指向它，`curl -N` 记录每帧到达的秒数：
+
+```
+18 : keep-alive
+33 : keep-alive
+38 data: {"type":"error",...}
+38 data: {"type":"done","durMs":35005,"stats":{...}}
+```
+
+静默 35 秒里两帧按时到达——这正是原来会断的窗口。
+
+另外 `TestSSEWriterSurvivesConcurrentWrites` 让两个 goroutine 各写 200 次，然后逐行 `json.Unmarshal` 每个 `data:` 帧——交错写出来的帧不是合法 JSON，这条能真抓到问题；`-race` 亦绿。

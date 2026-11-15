@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/usherf233/adks/internal/play"
@@ -57,20 +55,23 @@ func (s *Server) playTurn(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	enc := json.NewEncoder(w)
-	send := func(ev play.Event) {
-		if _, err := fmt.Fprint(w, "data: "); err != nil {
-			return
-		}
-		_ = enc.Encode(ev)
-		_, _ = w.Write([]byte("\n"))
-		flusher.Flush()
-	}
+	sw := newSSEWriter(w, flusher)
+
+	// The turn can be silent for minutes; without this a proxy in front drops the
+	// connection while nothing is actually wrong. Stop it before returning, and
+	// wait: a write after the handler ends panics.
+	stopBeat := make(chan struct{})
+	beatDone := make(chan struct{})
+	go keepAlive(stopBeat, beatDone, sw, sseHeartbeat)
+	defer func() {
+		close(stopBeat)
+		<-beatDone
+	}()
 
 	ctx, cancel := context.WithTimeout(r.Context(), sess.WallClock())
 	defer cancel()
 
-	sess.Converse(ctx, play.Request{UserID: req.UserID, SessionID: req.SessionID, Message: req.Message}, send)
+	sess.Converse(ctx, play.Request{UserID: req.UserID, SessionID: req.SessionID, Message: req.Message}, sw.event)
 }
 
 // confirm receives a human decision.
