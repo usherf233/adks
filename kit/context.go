@@ -47,12 +47,17 @@ func SanitizeToolOutput(src string, b []byte, max int) map[string]any {
 	return out
 }
 
+// Chars-per-token rules of thumb. Public figures, not official ones: both
+// functions below return estimates and callers must label them as such.
+const (
+	asciiCharsPerToken = 3.8
+	wideCharsPerToken  = 1.7
+)
+
 // EstimateTokens gives a rough prompt size, splitting ASCII from non-ASCII.
 //
 // A single chars-per-token ratio underestimates Chinese by roughly a factor of
-// two, which makes a capacity hint actively misleading. The coefficients are
-// public rules of thumb, not official figures, so callers must label the result
-// as an estimate.
+// two, which makes a capacity hint actively misleading.
 func EstimateTokens(s string) int {
 	var ascii, nonASCII int
 	for _, r := range s {
@@ -62,7 +67,19 @@ func EstimateTokens(s string) int {
 			nonASCII++
 		}
 	}
-	return int(float64(ascii)/3.8 + float64(nonASCII)/1.7)
+	return int(float64(ascii)/asciiCharsPerToken + float64(nonASCII)/wideCharsPerToken)
+}
+
+// EstimateASCIITokens sizes a run of ASCII bytes without materialising it.
+//
+// The estimator needs a character count, not characters. Callers that only know
+// how many bytes a schema would occupy used to build a string of that length just
+// to count it, which allocates and reads like a bug.
+func EstimateASCIITokens(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return int(float64(n) / asciiCharsPerToken)
 }
 
 // Fingerprint hashes a tool call into a short, stable identity. It is used by the

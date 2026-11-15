@@ -187,6 +187,16 @@ func validateRuntime(v *Validator, p *Project) {
 			v.warnf("spec.runtime.server.host", "binding %s without auth exposes the agent to the network", host)
 		}
 	}
+	if pp := rt.Server.PathPrefix; pp != "" {
+		// The value goes straight into the api sublauncher's flag, so a malformed
+		// prefix is not a cosmetic problem: the exported binary fails to start.
+		if !strings.HasPrefix(pp, "/") || strings.HasSuffix(pp, "/") || strings.ContainsAny(pp, " \t") {
+			v.errf("spec.runtime.server.pathPrefix", "must start with /, must not end with /, and must not contain spaces, got %q", pp)
+		}
+	}
+	if rt.Server.A2A && rt.Server.Auth == "" {
+		v.warnf("spec.runtime.server.a2a", "the A2A endpoint is unauthenticated; set auth: bearer before exposing this project")
+	}
 
 	switch rt.Session.Backend {
 	case "memory":

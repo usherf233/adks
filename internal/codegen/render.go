@@ -56,13 +56,15 @@ func (b *Bundle) Bytes() int {
 }
 
 type mainData struct {
-	Slug    string
-	Agent   string
-	Mode    string
-	Host    string
-	Port    string
-	Audit   bool
-	Version string
+	Slug       string
+	Agent      string
+	Mode       string
+	Host       string
+	Port       string
+	PathPrefix string
+	A2A        bool
+	Audit      bool
+	Version    string
 }
 
 // Render builds the bundle for one project.
@@ -79,13 +81,15 @@ func Render(p *manifest.Project, seed fs.FS) (*Bundle, error) {
 	b.Files["agent.yaml"] = yamlBytes
 
 	data := mainData{
-		Slug:    p.Metadata.Slug,
-		Agent:   p.Spec.Agent.Name,
-		Mode:    p.Spec.Runtime.Server.Mode,
-		Host:    p.Spec.Runtime.Server.Host,
-		Port:    strconv.Itoa(p.Spec.Runtime.Server.Port),
-		Audit:   true,
-		Version: Version,
+		Slug:       p.Metadata.Slug,
+		Agent:      p.Spec.Agent.Name,
+		Mode:       p.Spec.Runtime.Server.Mode,
+		Host:       p.Spec.Runtime.Server.Host,
+		Port:       strconv.Itoa(p.Spec.Runtime.Server.Port),
+		PathPrefix: p.Spec.Runtime.Server.PathPrefix,
+		A2A:        p.Spec.Runtime.Server.A2A,
+		Audit:      true,
+		Version:    Version,
 	}
 	var mainBuf bytes.Buffer
 	if err := mainTmpl.Execute(&mainBuf, data); err != nil {
@@ -157,7 +161,11 @@ func Render(p *manifest.Project, seed fs.FS) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	b.Files["Dockerfile"] = []byte(strings.Replace(dockerfileTmpl, "{{GO_VERSION}}", goVersion, 1))
+	df := strings.Replace(dockerfileTmpl, "{{GO_VERSION}}", goVersion, 1)
+	// EXPOSE has to match what the binary actually binds, otherwise the image
+	// documents a port nobody listens on.
+	df = strings.Replace(df, "{{PORT}}", strconv.Itoa(p.Spec.Runtime.Server.Port), 1)
+	b.Files["Dockerfile"] = []byte(df)
 	return b, nil
 }
 
@@ -254,7 +262,10 @@ WORKDIR /app
 COPY --from=build /out/agent /app/agent
 COPY agent.yaml /app/agent.yaml
 USER nonroot:nonroot
-EXPOSE 8080
+EXPOSE {{PORT}}
+# The manifest binds 127.0.0.1 by default, which inside a container reaches
+# nothing through the port map. Override with -e ADKS_HOST=<your bind address>.
+ENV ADKS_HOST=0.0.0.0
 # The manifest is embedded, so the binary is self-describing: no config mount.
 ENTRYPOINT ["/app/agent"]
 `
@@ -292,10 +303,22 @@ import (
 var manifestYAML []byte
 
 const (
-	// mode selects the launcher sub-command. ADK v2's web launcher has no
-	// -host flag: it listens on :port on every interface.
+	// mode selects the launcher sub-command. ADK v2's full launcher accepts only
+	// "console" and "web" as top-level keywords; "api" and "webui" are web
+	// sublaunchers and must follow web's own flags.
 	mode = {{ printf "%q" .Mode }}
 	port = {{ printf "%q" .Port }}
+	// host is where the web launcher binds. ADK v2's web launcher does take
+	// -host (default 127.0.0.1), and omitting it silently falls back to that
+	// default, which is why the manifest value has to be passed explicitly.
+	// ADKS_HOST overrides it at run time: a container has to bind 0.0.0.0 to be
+	// reachable through a port map.
+	host = {{ printf "%q" .Host }}
+	// pathPrefix moves the REST API off /api. It is a flag of the api
+	// sublauncher, so it has to follow that keyword rather than the web flags.
+	pathPrefix = {{ printf "%q" .PathPrefix }}
+	// a2a mounts the A2A endpoint as an extra sublauncher.
+	a2a = {{ .A2A }}
 )
 
 func main() {
@@ -355,16 +378,38 @@ func main() {
 //
 // full.NewLauncher() is a universal launcher whose only top-level keywords are
 // "console" and "web". "api" and "webui" are web sublaunchers: they have to
-// come after web's own flags, and there is no -host flag at all.
+// come after web's own flags. Go's flag package stops parsing at the first
+// non-flag argument, so every flag must precede those keywords.
+//
+// -host is passed explicitly. The launcher would otherwise default to
+// 127.0.0.1, which makes runtime.server.host inert and leaves a container
+// unreachable behind its port mapping.
 func defaultArgs() []string {
-	switch mode {
-	case "console":
-		return []string{"console"}
-	case "api":
-		return []string{"web", "-port", port, "api"}
-	default: // full | web
-		return []string{"web", "-port", port, "webui", "api"}
+	// A container cannot reach 0.0.0.0 through a manifest edit without a
+	// re-export, so the environment is the escape hatch for deployment.
+	bind := host
+	if v := os.Getenv("ADKS_HOST"); v != "" {
+		bind = v
 	}
+	if mode == "console" {
+		return []string{"console"}
+	}
+
+	flags := []string{"web", "-port", port, "-host", bind}
+	subs := []string{"webui", "api"}
+	if mode == "api" {
+		subs = []string{"api"}
+	}
+	// -path_prefix belongs to the api sublauncher, so it must follow "api" and
+	// precede the next keyword; a sublauncher flag placed before the keyword
+	// would be read as a web flag and rejected.
+	if pathPrefix != "" {
+		subs = append(subs, "-path_prefix", pathPrefix)
+	}
+	if a2a {
+		subs = append(subs, "a2a")
+	}
+	return append(flags, subs...)
 }
 
 // auditPath keeps the audit log next to the working directory unless the
@@ -427,6 +472,7 @@ express, but be aware a re-export overwrites them.
 |---|---|
 | ` + "`{{ .APIKeyEnv }}`" + ` | Model credential. Required. |
 | ` + "`ADKS_AUDIT`" + ` | Audit log path. Default ` + "`./.adks/audit.jsonl`" + `; empty disables. |
+| ` + "`ADKS_HOST`" + ` | Bind address override. Defaults to the manifest's ` + "`runtime.server.host`" + `; set ` + "`0.0.0.0`" + ` to be reachable through a container port map. |
 | ` + "`ADKS_TOKEN`" + ` | Bearer token, only when ` + "`runtime.server.auth: bearer`" + `. |
 
 Tool credentials referenced by ` + "`auth.secretEnv`" + ` or MCP ` + "`${VAR}`" + ` headers are read

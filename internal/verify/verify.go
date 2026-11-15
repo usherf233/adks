@@ -163,7 +163,16 @@ func smoke(ctx context.Context, dir string) Check {
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	client := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.Now().Add(20 * time.Second)
+	// The wait is bounded by whichever is shorter: the caller's deadline or the
+	// start-up budget. A hardcoded 20s used to outlive a tighter Options.Timeout,
+	// so a caller who asked for 5s still waited 20.
+	startupBudget := 20 * time.Second
+	if dl, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(dl); remaining < startupBudget {
+			startupBudget = remaining
+		}
+	}
+	deadline := time.Now().Add(startupBudget)
 	for time.Now().Before(deadline) {
 		select {
 		case <-exited:

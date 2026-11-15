@@ -6,7 +6,6 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -28,7 +27,6 @@ var ErrNotFound = errors.New("not found")
 
 const (
 	manifestFile = "agent.yaml"
-	indexFile    = "index.json"
 	maxSnapshots = 50
 )
 
@@ -47,8 +45,6 @@ type Store struct {
 	// perSlug serialises writes so two concurrent saves cannot interleave a
 	// snapshot and a rename.
 	perSlug sync.Map
-	// indexMu serialises the shared index.json across different projects.
-	indexMu sync.Mutex
 }
 
 // ProjectMeta is one row of the project list.
@@ -62,10 +58,6 @@ type ProjectMeta struct {
 	ToolCount    int       `json:"toolCount"`
 	ErrorCount   int       `json:"errorCount"`
 	WarnCount    int       `json:"warnCount"`
-}
-
-type index struct {
-	Projects []ProjectMeta `json:"projects"`
 }
 
 // New opens (and creates) the store rooted at root.
@@ -269,9 +261,9 @@ func (s *Store) saveLocked(slug string, p *manifest.Project, snapshot bool) (*ma
 	if err := writeAtomic(filepath.Join(dir, manifestFile), raw); err != nil {
 		return p, issues, err
 	}
-	if err := s.reindex(); err != nil {
-		return p, issues, err
-	}
+	// No derived index is written here. A project list is a directory read plus a
+	// parse per project, which is what List already does; maintaining a second
+	// copy of that answer on every save only created something to keep in sync.
 	return p, issues, nil
 }
 
@@ -419,23 +411,7 @@ func (s *Store) Delete(slug string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("delete project %q: %w", slug, err)
 	}
-	return s.reindex()
-}
-
-func (s *Store) reindex() error {
-	// Projects have independent per-slug locks, but index.json is shared: two
-	// saves for different slugs must not overwrite each other's snapshot.
-	s.indexMu.Lock()
-	defer s.indexMu.Unlock()
-	list, err := s.List()
-	if err != nil {
-		return err
-	}
-	buf, err := json.MarshalIndent(index{Projects: list}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeAtomic(filepath.Join(s.root, indexFile), buf)
+	return nil
 }
 
 func writeAtomic(path string, data []byte) error {
@@ -469,3 +445,55 @@ func hashOf(b []byte) string {
 
 // Hash is exported for callers that compare a manifest against its last run.
 func Hash(b []byte) string { return hashOf(b) }
+
+// MaxExportDirs is how many export/verify directories survive on disk.
+const MaxExportDirs = 10
+
+// PruneExportDirs keeps the newest keep directories under dir and removes the
+// rest.
+//
+// Every verify and every export writes a full copy of the module, and nothing
+// ever read them back: without a cap the builder slowly fills the disk with
+// snapshots nobody opens. Ordering is by modification time because the names
+// start with the slug, so lexical order says nothing about age.
+//
+// A directory another request is still writing is the newest by definition and
+// therefore last to go; the window this cannot cover is more than keep
+// concurrent exports, which is not a local-UI workload.
+func PruneExportDirs(dir string, keep int) error {
+	if keep <= 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("store: list exports: %w", err)
+	}
+	type item struct {
+		name string
+		mod  time.Time
+	}
+	items := make([]item, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		items = append(items, item{name: e.Name(), mod: info.ModTime()})
+	}
+	if len(items) <= keep {
+		return nil
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].mod.After(items[j].mod) })
+	for _, it := range items[keep:] {
+		if err := os.RemoveAll(filepath.Join(dir, it.name)); err != nil {
+			return fmt.Errorf("store: prune export %q: %w", it.name, err)
+		}
+	}
+	return nil
+}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/usherf233/adks/internal/codegen"
+	"github.com/usherf233/adks/internal/store"
 	"github.com/usherf233/adks/internal/verify"
 	"github.com/usherf233/adks/manifest"
 )
@@ -60,9 +61,17 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request) {
 // newExportDir creates a unique destination so concurrent exports and verifies
 // never remove or overwrite each other's files. The timestamp keeps directories
 // readable; MkdirTemp's random suffix makes collisions impossible.
+//
+// Older directories are pruned here rather than on a timer: this is the only
+// place that grows the directory, so it is the only place that has to bound it.
 func newExportDir(base, slug, kind string) (string, error) {
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", fmt.Errorf("prepare exports directory: %w", err)
+	}
+	if err := store.PruneExportDirs(base, store.MaxExportDirs); err != nil {
+		// Not fatal: a tidy exports directory is housekeeping, and failing an
+		// export because an old directory could not be removed would be worse.
+		log.Printf("api: prune exports: %v", err)
 	}
 	pattern := slug + "-" + kind + "-" + time.Now().Format("20060102-150405") + "-*"
 	dir, err := os.MkdirTemp(base, pattern)

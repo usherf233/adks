@@ -1,8 +1,6 @@
 package api
 
 import (
-	"strings"
-
 	"github.com/usherf233/adks/kit"
 	"github.com/usherf233/adks/manifest"
 )
@@ -58,7 +56,7 @@ func estimateFor(p *manifest.Project) estimate {
 	// real schema is only known after connecting.
 	schemaBytes += len(p.Spec.Tools.Builtin) * 40
 	schemaBytes += len(p.Spec.Tools.MCP) * 600
-	e.ToolSchemaTokens = kit.EstimateTokens(strings.Repeat("x", schemaBytes))
+	e.ToolSchemaTokens = kit.EstimateASCIITokens(schemaBytes)
 	e.TotalTokens = e.InstructionTokens + e.ToolSchemaTokens
 	return e
 }

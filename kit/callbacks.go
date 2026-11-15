@@ -105,14 +105,28 @@ func NewLoopGuard() llmagent.BeforeToolCallback {
 }
 
 // AuditSink appends one JSON object per line.
+//
+// The handle stays open across calls and is rotated by size. Opening, syncing
+// and closing per tool call put an fsync on the hot path of every model step,
+// which is a real cost on Windows and buys little: the log is evidence read
+// after the fact, not a write-ahead log. Data reaches the OS page cache on every
+// write and the file is closed with the layer, so only a machine losing power
+// mid-run can drop the tail.
 type AuditSink struct {
 	Path string
 	// Verbose records raw arguments. Off by default: arguments routinely carry
 	// personal data, and an audit log is the last place it should accumulate.
 	Verbose bool
 
-	mu sync.Mutex
+	mu     sync.Mutex
+	f      *os.File
+	size   int64
+	closed bool
 }
+
+// maxAuditBytes bounds one audit file. Rotation keeps a single generation, which
+// is enough to survive a runaway loop without filling the disk.
+const maxAuditBytes = 8 << 20
 
 // AuditEvent is one line of the audit log.
 type AuditEvent struct {
@@ -149,17 +163,77 @@ func (s *AuditSink) Write(ev AuditEvent) error {
 	if err != nil {
 		return err
 	}
+	line := append(buf, '\n')
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if s.f == nil {
+		if err := s.openLocked(); err != nil {
+			return err
+		}
+	}
+	if s.size >= maxAuditBytes {
+		if err := s.rotateLocked(); err != nil {
+			return err
+		}
+	}
+	n, err := s.f.Write(line)
+	s.size += int64(n)
+	return err
+}
+
+// openLocked opens the log for appending and learns its current size, so a sink
+// reused across builds still rotates at the right point.
+func (s *AuditSink) openLocked() error {
 	f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := f.Write(append(buf, '\n')); err != nil {
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
 		return err
 	}
-	return f.Sync()
+	s.f = f
+	s.size = info.Size()
+	return nil
+}
+
+// rotateLocked moves the current file aside and starts a fresh one. One
+// generation is kept: enough to inspect what led up to a runaway, cheap enough
+// that nobody has to think about it.
+func (s *AuditSink) rotateLocked() error {
+	if s.f != nil {
+		_ = s.f.Close()
+		s.f = nil
+	}
+	if err := os.Rename(s.Path, s.Path+".1"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return s.openLocked()
+}
+
+// Close releases the handle. It is registered with the layer so an exported
+// binary does not rely on process exit to flush.
+func (s *AuditSink) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if s.f == nil {
+		return nil
+	}
+	err := s.f.Close()
+	s.f = nil
+	return err
 }
 
 // NewAuditCallbacks records one line per tool call.

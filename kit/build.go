@@ -105,6 +105,11 @@ func BuildWith(ctx context.Context, p *manifest.Project, opts Options) (*Layer, 
 	if err != nil {
 		return nil, err
 	}
+	if sink != nil {
+		// The sink holds an open file handle across calls, so the layer owns its
+		// lifetime rather than the process exit.
+		l.AddCloser(sink)
+	}
 
 	var a agent.Agent
 	if p.Spec.Mode == manifest.ModeGraph {

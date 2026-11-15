@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/usherf233/adks/manifest"
 )
@@ -217,4 +218,70 @@ func countErrors(issues []manifest.Issue) int {
 		}
 	}
 	return n
+}
+
+// TestPruneExportDirsKeepsNewest pins the retention rule: exports accumulate one
+// full module copy per verify/export, and ordering has to be by modification
+// time because the names begin with the slug rather than a timestamp.
+func TestPruneExportDirsKeepsNewest(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 5; i++ {
+		p := filepath.Join(dir, "demo-export-"+string(rune('a'+i)))
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Later entries get later mtimes; only the newest two must survive.
+		mod := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := PruneExportDirs(dir, 2); err != nil {
+		t.Fatalf("PruneExportDirs: %v", err)
+	}
+
+	left, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range left {
+		names = append(names, e.Name())
+	}
+	if len(names) != 2 {
+		t.Fatalf("kept %d directories, want 2: %v", len(names), names)
+	}
+	for _, want := range []string{"demo-export-d", "demo-export-e"} {
+		found := false
+		for _, n := range names {
+			if n == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("pruning removed the newest %q; kept %v", want, names)
+		}
+	}
+}
+
+func TestPruneExportDirsNoOpCases(t *testing.T) {
+	// A missing directory is not an error: the first export creates it.
+	if err := PruneExportDirs(filepath.Join(t.TempDir(), "absent"), 3); err != nil {
+		t.Fatalf("missing directory: %v", err)
+	}
+	// keep <= 0 disables pruning entirely.
+	dir := t.TempDir()
+	for i := 0; i < 3; i++ {
+		if err := os.MkdirAll(filepath.Join(dir, "d"+string(rune('0'+i))), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := PruneExportDirs(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 3 {
+		t.Fatalf("keep=0 removed directories: %d left", len(left))
+	}
 }

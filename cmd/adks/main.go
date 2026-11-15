@@ -72,9 +72,7 @@ func serve(args []string) error {
 	}
 	// An empty host would make net.JoinHostPort produce ":7788", which listens on
 	// every interface. Normalise it instead of letting it look like loopback.
-	if *host == "" {
-		*host = "127.0.0.1"
-	}
+	*host = normalizeHost(*host)
 
 	root := *home
 	if root == "" {
@@ -94,8 +92,8 @@ func serve(args []string) error {
 	}
 
 	token := os.Getenv("ADKS_TOKEN")
-	if !isLoopback(*host) && token == "" {
-		return fmt.Errorf("refusing to bind %s without ADKS_TOKEN: the builder exposes model credentials and file writes", *host)
+	if err := requireTokenForExposure(*host, token); err != nil {
+		return err
 	}
 
 	srv := api.New(st, adks.FS, version, token)
@@ -142,4 +140,27 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// normalizeHost resolves the one value net.Listen treats as "everything".
+// net.JoinHostPort("", port) yields ":port", which binds every interface, so an
+// empty -host would silently turn the safest default into the most exposed one.
+func normalizeHost(host string) string {
+	if host == "" {
+		return "127.0.0.1"
+	}
+	return host
+}
+
+// requireTokenForExposure is the single gate between "local builder" and "an
+// unauthenticated HTTP API that can write files and spend model credits".
+//
+// It is a pure function so the refusal itself can be tested without starting a
+// server: this is the one security assertion in the binary, and it used to have
+// no test at all. host must already be normalised.
+func requireTokenForExposure(host, token string) error {
+	if token != "" || isLoopback(host) {
+		return nil
+	}
+	return fmt.Errorf("refusing to bind %s without ADKS_TOKEN: the builder exposes model credentials and file writes", host)
 }

@@ -60,6 +60,9 @@ func TestExportedModuleBuilds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles a generated module")
 	}
+	// Deliberately serial with respect to the other build test. Both drive the
+	// same Go build cache; running them concurrently measured slower (26s wall
+	// against 21s), so the parallelism that looks obvious on paper is a loss here.
 	seed := os.DirFS("../..")
 	b, err := Render(manifest.New("demo", "Demo"), seed)
 	if err != nil {
@@ -79,24 +82,52 @@ func TestExportedModuleBuilds(t *testing.T) {
 	}
 }
 
-// TestDefaultArgsMatchesLauncherKeywords guards the generated argv against
-// the pre-ADK-v2 launcher syntax (mode as a keyword plus a -host flag).
+// TestDefaultArgsMatchesLauncherKeywords guards the generated argv on two
+// counts: the pre-ADK-v2 launcher syntax (mode as a keyword) must not come back,
+// and -host must be passed. Omitting -host does not fail to build, it silently
+// pins every exported binary to 127.0.0.1 no matter what the manifest says.
 func TestDefaultArgsMatchesLauncherKeywords(t *testing.T) {
 	seed := os.DirFS("../..")
 	for _, mode := range []string{"full", "web", "api", "console"} {
 		p := manifest.New("demo", "Demo")
 		p.Spec.Runtime.Server.Mode = mode
+		p.Spec.Runtime.Server.Host = "0.0.0.0"
 		b, err := Render(p, seed)
 		if err != nil {
 			t.Fatal(err)
 		}
 		main := string(b.Files["main.go"])
-		if strings.Contains(main, `[]string{mode,`) || strings.Contains(main, `"-host"`) {
+		if strings.Contains(main, `[]string{mode,`) {
 			t.Fatalf("mode %q: defaultArgs still uses the launcher's old argv", mode)
 		}
-		if mode != "console" && !strings.Contains(main, `[]string{"web", "-port", port`) {
-			t.Fatalf("mode %q: defaultArgs does not select the web launcher", mode)
+		if mode == "console" {
+			continue
 		}
+		if !strings.Contains(main, `"-host"`) || !strings.Contains(main, `host = "0.0.0.0"`) {
+			t.Fatalf("mode %q: the manifest host does not reach the launcher argv", mode)
+		}
+		if !strings.Contains(main, `ADKS_HOST`) {
+			t.Fatalf("mode %q: no run-time escape hatch for a container bind address", mode)
+		}
+	}
+}
+
+// TestRenderDockerfileExposesManifestPort keeps EXPOSE in step with the port the
+// binary actually binds. A fixed 8080 told container users to map a port nobody
+// was listening on whenever the manifest chose another one.
+func TestRenderDockerfileExposesManifestPort(t *testing.T) {
+	p := manifest.New("demo", "Demo")
+	p.Spec.Runtime.Server.Port = 9099
+	b, err := Render(p, os.DirFS("../.."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker := string(b.Files["Dockerfile"])
+	if !strings.Contains(docker, "EXPOSE 9099") {
+		t.Fatalf("EXPOSE does not follow runtime.server.port:\n%s", docker)
+	}
+	if strings.Contains(docker, "{{PORT}}") {
+		t.Fatal("Dockerfile port placeholder was not substituted")
 	}
 }
 
@@ -106,7 +137,9 @@ func TestExportedBinaryStartsWithoutArgs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles and starts a generated binary")
 	}
-	t.Setenv("GOOGLE_API_KEY", "dummy")
+	// The placeholder credential is passed to the child process rather than
+	// through t.Setenv, so this test does not mutate process-global state that
+	// the parallel tests in this package would race with.
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -141,6 +174,7 @@ func TestExportedBinaryStartsWithoutArgs(t *testing.T) {
 
 	run := exec.CommandContext(ctx, bin)
 	run.Dir = dir
+	run.Env = append(os.Environ(), "GOOGLE_API_KEY=dummy")
 	var output strings.Builder
 	run.Stdout = &output
 	run.Stderr = &output
