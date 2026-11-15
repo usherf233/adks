@@ -6,22 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
+
+	"github.com/usherf233/adks/internal/play"
 )
 
-// PlayEvent is one server-sent event of a trial run.
-type PlayEvent struct {
-	Type   string         `json:"type"` // text | tool_call | tool_result | confirm_required | error | done
-	Text   string         `json:"text,omitempty"`
-	Tool   string         `json:"tool,omitempty"`
-	CallID string         `json:"callId,omitempty"`
-	Args   map[string]any `json:"args,omitempty"`
-	OK     *bool          `json:"ok,omitempty"`
-	Code   string         `json:"code,omitempty"`
-	DurMs  int64          `json:"durMs,omitempty"`
-}
-
-func (s *Server) play(w http.ResponseWriter, r *http.Request) {
+// playTurn streams one turn as server-sent events.
+//
+// This handler is deliberately thin: it validates the request, asks the play
+// service to pin a compiled project, and turns events into SSE frames. Everything
+// stateful — the compiled-project cache, the pending confirmations, the
+// confirmation resume loop — lives in the service, which is what keeps this type
+// from growing a second responsibility.
+func (s *Server) playTurn(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
 	var req struct {
 		SessionID string `json:"sessionId"`
@@ -40,13 +36,15 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request) {
 		req.UserID = "builder"
 	}
 
-	rnr, p, release, err := s.layers.Get(r.Context(), slug)
+	// Preparation happens before the first byte, so a missing project is still a
+	// 404 and a manifest that does not compile is still a 400. Once the stream
+	// starts the status is already committed.
+	sess, err := s.play.Prepare(r.Context(), slug)
 	if err != nil {
-		// A missing project is 404; a manifest that does not compile is a 400.
 		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
-	defer release()
+	defer sess.Close()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -60,8 +58,8 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	enc := json.NewEncoder(w)
-	send := func(ev PlayEvent) {
-		if _, err := fmt.Fprintf(w, "data: "); err != nil {
+	send := func(ev play.Event) {
+		if _, err := fmt.Fprint(w, "data: "); err != nil {
 			return
 		}
 		_ = enc.Encode(ev)
@@ -69,14 +67,10 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	wallClock := time.Duration(p.Spec.Policy.Limits.MaxWallClockSec) * time.Second
-	if wallClock <= 0 {
-		wallClock = defaultWallClock
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), wallClock)
+	ctx, cancel := context.WithTimeout(r.Context(), sess.WallClock())
 	defer cancel()
 
-	s.converse(ctx, rnr, slug, req.UserID, req.SessionID, req.Message, send)
+	sess.Converse(ctx, play.Request{UserID: req.UserID, SessionID: req.SessionID, Message: req.Message}, send)
 }
 
 // confirm receives a human decision.
@@ -94,7 +88,7 @@ func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("callId and sessionId are required"))
 		return
 	}
-	if !s.plays.deliver(req.CallID, req.Approved, slugOf(r), req.SessionID) {
+	if !s.play.Confirm(slugOf(r), req.SessionID, req.CallID, req.Approved) {
 		// Not an error worth a red banner: the run may already have timed out.
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "reason": "no pending confirmation for that callId"})
 		return

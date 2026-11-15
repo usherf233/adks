@@ -1409,6 +1409,7 @@ function addToolCall(ev) {
       <span class="arrow">→</span>
       <span>${esc(ev.tool)}</span>
       <span class="muted" style="font-size:10.5px">${esc(summarizeArgs(ev.args))}</span>
+      <span class="dur muted" style="font-size:10.5px;margin-left:auto"></span>
     </summary>
     <pre>${esc(JSON.stringify(ev.args || {}, null, 2))}</pre>`;
   $('#chat').appendChild(el);
@@ -1440,9 +1441,11 @@ function handleEvent(ev, bubble) {
         card.classList.add(ok ? 'ok' : 'err');
         const icon = card.querySelector('.arrow');
         if (icon) icon.textContent = ok ? '✓' : '✗';
+        const dur = card.querySelector('.dur');
+        if (dur && ev.durMs) dur.textContent = `${ev.durMs}ms`;
         if (ev.code) {
           const pre = card.querySelector('pre');
-          if (pre) pre.textContent += `\n\n// ${ev.code}${ev.durMs ? ` · ${ev.durMs}ms` : ''}`;
+          if (pre) pre.textContent += `\n\n// ${ev.code}`;
         }
       } else {
         const el = document.createElement('div');

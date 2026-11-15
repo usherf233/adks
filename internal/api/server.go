@@ -7,17 +7,21 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/usherf233/adks/internal/play"
 	"github.com/usherf233/adks/internal/store"
 )
 
 // Server wires the store and the embedded assets into a handler.
+//
+// It holds no run state of its own: the compiled-project cache and the pending
+// confirmations belong to the play service, which owns their lifetimes. What is
+// left here is configuration and the two lookups every handler needs.
 type Server struct {
 	store   *store.Store
 	seed    fs.FS
 	version string
 	token   string
-	layers  *layerCache
-	plays   *playHub
+	play    *play.Service
 }
 
 // New builds a server. seed must contain the kit and manifest sources, which are
@@ -28,19 +32,15 @@ func New(st *store.Store, seed fs.FS, version, token string) *Server {
 		seed:    seed,
 		version: version,
 		token:   token,
-		layers:  newLayerCache(st),
-		plays:   newPlayHub(),
+		play:    play.New(st),
 	}
 }
 
-// Close releases every compiled layer and drops pending confirmations. Call it
-// on shutdown so MCP child processes and SQLite handles do not outlive the server.
+// Close releases the play service: compiled layers (MCP child processes, session
+// databases) and any pending confirmations. Call it on shutdown.
 func (s *Server) Close() {
-	if s.layers != nil {
-		s.layers.CloseAll()
-	}
-	if s.plays != nil {
-		s.plays.Close()
+	if s.play != nil {
+		s.play.Close()
 	}
 }
 
@@ -69,7 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects/{slug}/probe/sql", s.probeSQL)
 	mux.HandleFunc("POST /api/projects/{slug}/probe/mcp", s.probeMCP)
 
-	mux.HandleFunc("POST /api/projects/{slug}/play", s.play)
+	mux.HandleFunc("POST /api/projects/{slug}/play", s.playTurn)
 	mux.HandleFunc("POST /api/projects/{slug}/play/confirm", s.confirm)
 
 	mux.HandleFunc("GET /api/projects/{slug}/files", s.files)

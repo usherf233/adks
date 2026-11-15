@@ -43,8 +43,8 @@
 flowchart LR
     UI["Web UI<br/>原生 JS，无构建步骤"] -->|PUT agent.yaml| API["HTTP 层<br/>internal/api"]
     API --> VAL["manifest<br/>校验 · 默认值 · 拓扑"]
-    VAL --> KIT["kit<br/>manifest → ADK 对象"]
-    KIT --> PLAY["试跑<br/>SSE 流式 + 工具确认"]
+    API --> PLAY["试跑<br/>internal/play<br/>编译缓存 · 确认回执"]
+    PLAY --> KIT["kit<br/>manifest → ADK 对象"]
     API --> PROBE["探测<br/>model · sql · mcp"]
     API --> VER["verify<br/>build / vet / 冒烟"]
     API --> EXP["codegen<br/>导出"]
@@ -52,6 +52,8 @@ flowchart LR
 ```
 
 依赖方向单向：`cmd → internal/* → kit → manifest`，无反向引用。`manifest` 除 `yaml.v3` 外零依赖，正是为了能被原样拷走。
+
+`internal/api` 只做 HTTP：解析请求、收敛状态码、编码 SSE。所有"活下去的状态"——编译缓存（持有 MCP 子进程与 session 库）、待确认回执、确认后重入的循环——都在 `internal/play`，并由它独占关停契约。
 
 ## 快速开始
 
@@ -129,7 +131,7 @@ go run . console                    # 终端聊天，不开浏览器
 | **存储** | SQLite / MySQL / Postgres；会话、记忆、artifact 分别可选后端 |
 | **安全** | 破坏性工具需人工确认、单次运行限额（LLM 调用数 / 墙钟 / 工具并发 / 指令体积） |
 | **插件** | ADK 插件引用、回调、审计日志 |
-| **运行时** | 监听参数、健康检查、打包 Dockerfile |
+| **运行时** | 监听 host/port（host 可用 `ADKS_HOST` 覆盖）、`pathPrefix` 改写 REST 前缀、`a2a` 端点、健康检查、打包 Dockerfile |
 
 ## HTTP API
 
@@ -153,10 +155,13 @@ go run . console                    # 终端聊天，不开浏览器
 ## 开发
 
 ```bash
-make build      # 构建
-make check      # build + vet + test -race
-make run        # 构建并启动
+make build        # 构建
+make check        # build + vet + test -race（完整）
+make check-fast   # 同上，跳过编译/启动生成物的慢测试，约 7 秒
+make run          # 构建并启动
 ```
+
+> 慢测试占整套墙钟的 90% 以上，但对"改对了没有"几乎没有信息量——本地迭代用 `check-fast`，提 PR 前跑一次完整 `check`。
 
 Windows 上没装 make 也没关系，等价的手工命令：
 
@@ -172,7 +177,8 @@ go test -race -count=1 ./...
 
 ```
 cmd/adks/          入口：serve / version
-internal/api/      HTTP 层：CRUD、探测、流式试跑、导出、状态码收敛
+internal/api/      HTTP 层：CRUD、探测、导出、状态码收敛（试跑转发给 play）
+internal/play/     试跑：编译缓存（含空闲淘汰）、确认回执、确认后重入
 internal/store/    文件系统存储（一个项目 = 一个目录），无数据库
 internal/codegen/  渲染导出工程：整包复制 kit/manifest + 生成 main.go / Dockerfile / README
 internal/verify/   build、vet、冒烟启动三项确定性检查
@@ -187,7 +193,7 @@ designs/           架构设计台账
 - 不做多 Agent 拖拽编排画布；graph 可视化只读。
 - 不做运行时多租户鉴权，只靠单个 bearer token（`ADKS_TOKEN`）。
 - 不支持在 UI 里写自定义 Go 工具函数。
-- 导出工程的 launcher 参数是生成期常量，`runtime.server` 的 host/port 改了需重新导出。
+- 导出工程的 `runtime.server.port` 是生成期常量，改了需重新导出；`host` 同样编译进二进制，但可用 `ADKS_HOST` 在运行期覆盖（容器部署必须设 `0.0.0.0`，否则端口映射打不到）。
 
 ## 文档
 

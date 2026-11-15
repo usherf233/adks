@@ -1,4 +1,11 @@
-package api
+// Package play runs a compiled project and streams one turn of it.
+//
+// It owns the two pieces of state that outlive a single HTTP request: the
+// compiled-project cache (MCP child processes, open session databases) and the
+// pending-confirmation hub. Both have an explicit shutdown contract, which is the
+// reason they live behind one Service instead of being fields on the HTTP server
+// where any handler could reach them.
+package play
 
 import (
 	"context"
@@ -13,18 +20,38 @@ import (
 	"github.com/usherf233/adks/manifest"
 )
 
+const (
+	// layerIdleTTL bounds how long a compiled project keeps its resources after
+	// the last message. A compiled layer holds an MCP child process per stdio
+	// server and an open session database, so an unbounded cache means a builder
+	// that has opened twenty projects is running twenty child processes until it
+	// exits. Long enough that switching between two projects stays instant.
+	layerIdleTTL = 15 * time.Minute
+	// closeTimeout bounds releasing one compiled layer.
+	closeTimeout = 10 * time.Second
+)
+
 // layerCache keeps one compiled project alive between messages.
 //
 // Rebuilding per message would reconnect every MCP server and reopen the session
 // database on each turn, which is both slow and, for stdio servers, a new child
 // process per message. The cache is keyed by manifest hash, so an edit compiles
 // on the next run and no earlier.
+//
+// Keeping entries forever is not an option: each one holds an MCP child process
+// per stdio server plus an open session database. An idle entry is retired after
+// ttl, which is why layerEntry.used has to be maintained rather than decorative.
 type layerCache struct {
 	st *store.Store
 
 	mu      sync.Mutex
 	entries map[string]*layerEntry
 	locks   map[string]*sync.Mutex
+	// ttl is the idle window after which a compiled project is released. Zero
+	// disables eviction, which only tests want.
+	ttl time.Duration
+	// now is a seam so eviction can be tested without sleeping.
+	now func() time.Time
 }
 
 type layerEntry struct {
@@ -38,7 +65,13 @@ type layerEntry struct {
 }
 
 func newLayerCache(st *store.Store) *layerCache {
-	return &layerCache{st: st, entries: map[string]*layerEntry{}, locks: map[string]*sync.Mutex{}}
+	return &layerCache{
+		st:      st,
+		entries: map[string]*layerEntry{},
+		locks:   map[string]*sync.Mutex{},
+		ttl:     layerIdleTTL,
+		now:     timeNow,
+	}
 }
 
 func (c *layerCache) slugLock(slug string) *sync.Mutex {
@@ -50,6 +83,34 @@ func (c *layerCache) slugLock(slug string) *sync.Mutex {
 		c.locks[slug] = mu
 	}
 	return mu
+}
+
+// nowTime reads the clock through the seam, falling back to the real one for a
+// cache built by hand in a test.
+func (c *layerCache) nowTime() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return timeNow()
+}
+
+// evictIdleLocked retires entries that have been idle past ttl. It must run with
+// c.mu held. A dirty entry (refs > 0) is never taken: a save made mid-run must
+// not pull the session database out from under that run.
+func (c *layerCache) evictIdleLocked() {
+	if c.ttl <= 0 {
+		return
+	}
+	now := c.nowTime()
+	var stale []*layerEntry
+	for _, e := range c.entries {
+		if e.refs == 0 && now.Sub(e.used) > c.ttl {
+			stale = append(stale, e)
+		}
+	}
+	for _, e := range stale {
+		c.retireLocked(e)
+	}
 }
 
 // Get returns a runner for the current manifest, compiling if needed. The
@@ -68,9 +129,10 @@ func (c *layerCache) Get(ctx context.Context, slug string) (*runner.Runner, *man
 	defer mu.Unlock()
 
 	c.mu.Lock()
+	c.evictIdleLocked()
 	entry, ok := c.entries[slug]
 	if ok && entry.hash == hash && !entry.retired {
-		entry.used = timeNow()
+		entry.used = c.nowTime()
 		entry.refs++
 		release := c.releaseFunc(entry)
 		c.mu.Unlock()
@@ -81,13 +143,12 @@ func (c *layerCache) Get(ctx context.Context, slug string) (*runner.Runner, *man
 	}
 	c.mu.Unlock()
 
-	runtimeDir := c.st.RuntimeDir(slug)
-	rp, err := runtimeProject(p, runtimeDir)
+	rp, err := c.st.PrepareRuntime(p, slug)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	layer, err := kit.BuildWith(ctx, rp, kit.Options{
-		AuditPath: runtimeDir + "/audit.jsonl",
+		AuditPath: c.st.RuntimeDir(slug) + "/audit.jsonl",
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -106,7 +167,7 @@ func (c *layerCache) Get(ctx context.Context, slug string) (*runner.Runner, *man
 		return nil, nil, nil, fmt.Errorf("create runner: %w", err)
 	}
 
-	entry = &layerEntry{slug: slug, hash: hash, layer: layer, runner: rnr, used: timeNow(), refs: 1}
+	entry = &layerEntry{slug: slug, hash: hash, layer: layer, runner: rnr, used: c.nowTime(), refs: 1}
 	c.mu.Lock()
 	c.entries[slug] = entry
 	c.mu.Unlock()
@@ -119,6 +180,9 @@ func (c *layerCache) releaseFunc(e *layerEntry) func() {
 		once.Do(func() {
 			c.mu.Lock()
 			e.refs--
+			// The idle clock starts when the last run ends, not when it began:
+			// a two-minute conversation must not consume the whole TTL.
+			e.used = c.nowTime()
 			shouldClose := e.retired && e.refs == 0
 			c.mu.Unlock()
 			if shouldClose {
@@ -155,7 +219,7 @@ func (c *layerCache) CloseAll() {
 	c.mu.Lock()
 	entries := c.entries
 	c.entries = map[string]*layerEntry{}
-	// Per-slug locks are only created by Get; with the server shutting down they
+	// Per-slug locks are only created by Get; with the service shutting down they
 	// can be released too instead of growing for every project ever opened.
 	c.locks = map[string]*sync.Mutex{}
 	idle := make([]*layerEntry, 0, len(entries))
@@ -183,5 +247,10 @@ func (c *layerCache) closeEntry(e *layerEntry) {
 // closeWith is the only place a compiled layer is released. CloseAll uses it
 // synchronously at shutdown; retired entries reach it through closeEntry.
 func (c *layerCache) closeWith(ctx context.Context, e *layerEntry) {
+	if e == nil || e.layer == nil {
+		// An entry only exists once Build succeeded, but tests drive the cache
+		// with placeholders: an unbuilt entry has nothing to release.
+		return
+	}
 	_ = e.layer.Close(ctx)
 }

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/usherf233/adks/internal/store"
 )
@@ -47,9 +46,6 @@ func readJSON(r *http.Request, v any) error {
 	}
 	return json.Unmarshal(body, v)
 }
-
-// timeNow is a seam for tests.
-var timeNow = time.Now
 
 // readOptionalJSON makes "this endpoint accepts an empty body" explicit.
 // verify and export fall back to their defaults when the client posts nothing;

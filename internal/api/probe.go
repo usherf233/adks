@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/usherf233/adks/internal/store"
 	"github.com/usherf233/adks/kit"
 	"github.com/usherf233/adks/manifest"
 )
@@ -55,7 +56,7 @@ func (s *Server) probeSQL(w http.ResponseWriter, r *http.Request) {
 	spec := p.Spec.Runtime.Session
 	runtimeDir := s.store.RuntimeDir(slug)
 	if spec.Backend == "sqlite" {
-		spec.DSN = rebaseSQLiteDSN(spec.DSN, runtimeDir)
+		spec.DSN = store.RebaseSQLiteDSN(spec.DSN, runtimeDir)
 	}
 
 	start := time.Now()

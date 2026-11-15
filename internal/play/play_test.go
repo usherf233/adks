@@ -1,10 +1,11 @@
-package api
+package play
 
 import (
 	"context"
 	"errors"
 	"iter"
 	"testing"
+	"time"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
@@ -37,6 +38,24 @@ func (f fakeRunner) Run(context.Context, string, string, *genai.Content, agent.R
 	}
 }
 
+// pacedRunner is fakeRunner with a delay between events, which is the only way to
+// observe the tool-call duration: a run that replays instantly rounds to 0ms.
+type pacedRunner struct {
+	events []*session.Event
+	gap    time.Duration
+}
+
+func (p pacedRunner) Run(context.Context, string, string, *genai.Content, agent.RunConfig, ...runner.RunOption) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		for _, ev := range p.events {
+			time.Sleep(p.gap)
+			if !yield(ev, nil) {
+				return
+			}
+		}
+	}
+}
+
 func textEvent(text string) *session.Event {
 	return &session.Event{LLMResponse: model.LLMResponse{Content: &genai.Content{
 		Role:  "model",
@@ -58,13 +77,26 @@ func respEvent(name string, id string, resp map[string]any) *session.Event {
 	}}}
 }
 
-func collect(t *testing.T, r runnerLike) ([]PlayEvent, []pendingConfirm, error) {
+// newTestSession builds a Session with no compiled layer, which is enough for
+// everything except Prepare. The slug and hub must agree with what the tests
+// deliver decisions against.
+func newTestSession(r runnerLike) *Session {
+	return &Session{slug: testSlug, rnr: r, hub: newPlayHub()}
+}
+
+const (
+	testSlug    = "demo"
+	testSession = "s"
+)
+
+func collect(t *testing.T, r runnerLike) ([]Event, []pendingConfirm, error) {
 	t.Helper()
-	var got []PlayEvent
-	s := &Server{}
-	pending, err := s.runTurn(context.Background(), r, "u", "s", genai.NewContentFromText("hi", genai.RoleUser), func(ev PlayEvent) {
-		got = append(got, ev)
-	})
+	var got []Event
+	s := newTestSession(r)
+	pending, err := s.runTurn(context.Background(),
+		Request{UserID: "u", SessionID: testSession},
+		genai.NewContentFromText("hi", genai.RoleUser),
+		func(ev Event) { got = append(got, ev) })
 	return got, pending, err
 }
 
@@ -100,6 +132,68 @@ func TestRunTurnMapsEvents(t *testing.T) {
 	}
 }
 
+// TestRunTurnReportsToolDuration pins that Event.DurMs is filled in. The field
+// existed for a long time with nothing writing it, so the UI column that reads it
+// was always empty.
+func TestRunTurnReportsToolDuration(t *testing.T) {
+	r := pacedRunner{
+		events: []*session.Event{
+			callEvent("lookup", map[string]any{"id": "1"}, "c1"),
+			respEvent("lookup", "c1", map[string]any{"ok": true}),
+		},
+		gap: 5 * time.Millisecond,
+	}
+	got, _, err := collect(t, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result *Event
+	for i := range got {
+		if got[i].Type == "tool_result" {
+			result = &got[i]
+		}
+	}
+	if result == nil {
+		t.Fatalf("no tool_result event: %+v", got)
+	}
+	if result.DurMs < 3 {
+		t.Fatalf("tool_result duration = %dms, want at least the 5ms gap", result.DurMs)
+	}
+}
+
+// TestRunTurnDurationsAreNotSharedAcrossCalls guards against a single accumulator:
+// two calls must report their own durations, not the sum.
+func TestRunTurnDurationsAreNotSharedAcrossCalls(t *testing.T) {
+	r := pacedRunner{
+		events: []*session.Event{
+			callEvent("first", nil, "c1"),
+			respEvent("first", "c1", map[string]any{"ok": true}),
+			callEvent("second", nil, "c2"),
+			respEvent("second", "c2", map[string]any{"ok": true}),
+		},
+		gap: 5 * time.Millisecond,
+	}
+	got, _, err := collect(t, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var durs []int64
+	for _, ev := range got {
+		if ev.Type == "tool_result" {
+			durs = append(durs, ev.DurMs)
+		}
+	}
+	if len(durs) != 2 {
+		t.Fatalf("got %d tool results, want 2", len(durs))
+	}
+	for i, d := range durs {
+		if d > 20 {
+			t.Fatalf("result %d reports %dms for a 5ms call: durations are accumulating", i, d)
+		}
+	}
+}
+
 func TestRunTurnSurfacesConfirmationRequest(t *testing.T) {
 	r := fakeRunner{events: []*session.Event{
 		callEvent(toolconfirmation.FunctionCallName, map[string]any{
@@ -116,7 +210,7 @@ func TestRunTurnSurfacesConfirmationRequest(t *testing.T) {
 		t.Fatalf("runTurn: %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("runTurn must not emit the confirmation itself, converse does: %+v", got)
+		t.Fatalf("runTurn must not emit the confirmation itself, Converse does: %+v", got)
 	}
 	if len(pending) != 1 || pending[0].CallID != "conf-1" || pending[0].Tool != "cancel_order" {
 		t.Fatalf("confirmation not tracked: %+v", pending)
@@ -151,7 +245,6 @@ func (f *scriptedRunner) Run(_ context.Context, _, _ string, msg *genai.Content,
 }
 
 func TestConverseResumesAfterApproval(t *testing.T) {
-	s := &Server{plays: newPlayHub()}
 	r := &scriptedRunner{scripts: [][]*session.Event{
 		// First hop: the model asks to cancel an order and stops.
 		{callEvent(toolconfirmation.FunctionCallName, map[string]any{
@@ -162,13 +255,14 @@ func TestConverseResumesAfterApproval(t *testing.T) {
 		// Second hop: after approval the model answers.
 		{textEvent("已取消。")},
 	}}
+	s := newTestSession(r)
 
-	var events []PlayEvent
-	s.converse(context.Background(), r, "p", "u", "s", "取消订单 A1", func(ev PlayEvent) {
+	var events []Event
+	s.Converse(context.Background(), Request{UserID: "u", SessionID: testSession, Message: "取消订单 A1"}, func(ev Event) {
 		events = append(events, ev)
 		// Answer the confirmation from inside the stream, the way the browser does.
 		if ev.Type == "confirm_required" {
-			s.plays.deliver(ev.CallID, true)
+			s.hub.deliver(ev.CallID, true, testSlug, testSession)
 		}
 	})
 
@@ -201,18 +295,18 @@ func TestConverseResumesAfterApproval(t *testing.T) {
 }
 
 func TestConverseRejectionIsReportedAndFedBack(t *testing.T) {
-	s := &Server{plays: newPlayHub()}
 	r := &scriptedRunner{scripts: [][]*session.Event{
 		{callEvent(toolconfirmation.FunctionCallName, map[string]any{
 			"originalFunctionCall": map[string]any{"name": "cancel_order", "args": map[string]any{}, "id": "o"},
 		}, "conf-2")},
 		{textEvent("好的，我不执行。")},
 	}}
-	var events []PlayEvent
-	s.converse(context.Background(), r, "p", "u", "s", "取消", func(ev PlayEvent) {
+	s := newTestSession(r)
+	var events []Event
+	s.Converse(context.Background(), Request{UserID: "u", SessionID: testSession, Message: "取消"}, func(ev Event) {
 		events = append(events, ev)
 		if ev.Type == "confirm_required" {
-			s.plays.deliver(ev.CallID, false)
+			s.hub.deliver(ev.CallID, false, testSlug, testSession)
 		}
 	})
 
@@ -231,13 +325,16 @@ func TestConverseRejectionIsReportedAndFedBack(t *testing.T) {
 }
 
 func TestConverseStopsWhenBudgetRunsOut(t *testing.T) {
-	s := &Server{plays: newPlayHub()}
-	r := &scriptedRunner{}
-	var events []PlayEvent
-	s.converse(context.Background(), &errRunner{}, "p", "u", "s", "hi", func(ev PlayEvent) { events = append(events, ev) })
-	_ = r
+	s := newTestSession(&errRunner{})
+	var events []Event
+	s.Converse(context.Background(), Request{UserID: "u", SessionID: testSession, Message: "hi"}, func(ev Event) {
+		events = append(events, ev)
+	})
 	if len(events) < 2 || events[0].Type != "error" || events[len(events)-1].Type != "done" {
 		t.Fatalf("a failing run must end with an error and a done event: %+v", events)
+	}
+	if events[0].Code != "WALL_CLOCK" {
+		t.Fatalf("a budget failure must carry the WALL_CLOCK code, got %+v", events[0])
 	}
 }
 
@@ -270,18 +367,35 @@ func TestRunTurnReturnsRunnerError(t *testing.T) {
 
 func TestPlayHubDeliversOnlyOnce(t *testing.T) {
 	h := newPlayHub()
-	ch := h.register("c1")
-	if !h.deliver("c1", true) {
+	ch := h.register("c1", "p", "s")
+	if !h.deliver("c1", true, "p", "s") {
 		t.Fatal("expected delivery to a registered call")
 	}
 	if v := <-ch; !v {
 		t.Fatal("expected approval to arrive")
 	}
-	if h.deliver("c1", true) {
+	if h.deliver("c1", true, "p", "s") {
 		t.Fatal("a second delivery must not find a listener")
 	}
-	if h.deliver("nope", true) {
+	if h.deliver("nope", true, "p", "s") {
 		t.Fatal("unknown call id must not deliver")
+	}
+}
+
+// TestPlayHubRefusesForeignRun is the isolation rule: a decision must come from
+// the run that asked. Otherwise two open chat panels could approve each other's
+// tool calls.
+func TestPlayHubRefusesForeignRun(t *testing.T) {
+	h := newPlayHub()
+	h.register("c1", "p", "s1")
+	if h.deliver("c1", true, "p", "s2") {
+		t.Fatal("a decision from another session was accepted")
+	}
+	if h.deliver("c1", true, "other", "s1") {
+		t.Fatal("a decision from another project was accepted")
+	}
+	if !h.deliver("c1", true, "p", "s1") {
+		t.Fatal("the owning run could not deliver")
 	}
 }
 
@@ -299,5 +413,29 @@ func TestResponseOK(t *testing.T) {
 		if got := responseOK(c.resp); got != c.want {
 			t.Errorf("responseOK(%v) = %v, want %v", c.resp, got, c.want)
 		}
+	}
+}
+
+// TestSessionCloseReleasesOnce keeps the refcount contract: a double Close must
+// not decrement twice, which would let the cache close a layer someone else is
+// still streaming.
+func TestSessionCloseReleasesOnce(t *testing.T) {
+	releases := 0
+	s := &Session{release: func() { releases++ }}
+	s.Close()
+	s.Close()
+	if releases != 1 {
+		t.Fatalf("release called %d times, want 1", releases)
+	}
+}
+
+// TestPlayHubCloseDropsPending is the shutdown contract: after Close, a late
+// click must not resurrect a decision nobody is waiting for.
+func TestPlayHubCloseDropsPending(t *testing.T) {
+	h := newPlayHub()
+	h.register("c1", "project-a", "session-a")
+	h.Close()
+	if h.deliver("c1", true, "project-a", "session-a") {
+		t.Fatal("a closed hub still delivered a decision")
 	}
 }

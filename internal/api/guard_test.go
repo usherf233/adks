@@ -100,22 +100,8 @@ func TestPutInvalidYAMLDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestPlayHubDeliverChecksOwner(t *testing.T) {
-	h := newPlayHub()
-	ch := h.register("c1", "project-a", "session-a")
-	if h.deliver("c1", true, "project-b", "session-a") {
-		t.Fatal("a decision from another project was accepted")
-	}
-	if h.deliver("c1", true, "project-a", "session-b") {
-		t.Fatal("a decision from another session was accepted")
-	}
-	if !h.deliver("c1", true, "project-a", "session-a") {
-		t.Fatal("the owning run's decision was rejected")
-	}
-	if approved := <-ch; !approved {
-		t.Fatal("wrong decision delivered")
-	}
-}
+// TestPlayHubDeliverChecksOwner moved to internal/play with the hub itself: the
+// ownership rule belongs with the state it protects, not with the HTTP surface.
 
 func TestExportDirectoriesAreUnique(t *testing.T) {
 	s := guardTestServer(t)
@@ -156,14 +142,8 @@ func TestCreateUsesSameSlugRule(t *testing.T) {
 	}
 }
 
-func TestPlayHubCloseDropsPending(t *testing.T) {
-	h := newPlayHub()
-	h.register("c1", "project-a", "session-a")
-	h.Close()
-	if h.deliver("c1", true, "project-a", "session-a") {
-		t.Fatal("a closed hub still delivered a decision")
-	}
-}
+// TestPlayHubCloseDropsPending lives in internal/play: the shutdown contract of
+// the hub does not need an HTTP server to be exercised.
 
 // One rule everywhere: a project that does not exist is a 404, not a 200 with
 // an error field and not a 400 that looks like a bad request.

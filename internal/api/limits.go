@@ -2,13 +2,14 @@ package api
 
 import "time"
 
-// Budgets and body caps live in one place. Two of these used to be bare
-// 120*time.Second literals with different meanings, so changing one never
-// hinted that the other existed.
+// Budgets and body caps that belong to the HTTP surface live here.
+//
+// Turn-level budgets (confirmation wait, wall clock, layer shutdown, idle
+// eviction) moved with the play service: a constant that only one subsystem reads
+// belongs next to that subsystem, or the two drift back together.
 const (
-	maxBodyBytes     = 4 << 20
-	confirmTimeout   = 120 * time.Second
-	defaultWallClock = 120 * time.Second
-	closeTimeout     = 10 * time.Second
-	tidyTimeout      = 60 * time.Second
+	maxBodyBytes = 4 << 20
+	// tidyTimeout bounds `go mod tidy` in verify and export. Without it a hung
+	// module proxy would hold the request open indefinitely.
+	tidyTimeout = 60 * time.Second
 )

@@ -133,7 +133,7 @@ func (s *Server) putProject(w http.ResponseWriter, r *http.Request) {
 
 	// A changed manifest invalidates the compiled layer, but not here: the cache
 	// compares hashes on the next run so an unsaved edit never costs a rebuild.
-	s.layers.Invalidate(slug)
+	s.play.Invalidate(slug)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues":   issues,
 		"slug":     p.Metadata.Slug,
@@ -143,7 +143,7 @@ func (s *Server) putProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	slug := slugOf(r)
-	s.layers.Invalidate(slug)
+	s.play.Invalidate(slug)
 	if err := s.store.Delete(slug); err != nil {
 		writeLoadErr(w, err, http.StatusInternalServerError)
 		return
@@ -181,7 +181,7 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "issues": issues})
 		return
 	}
-	s.layers.Invalidate(slug)
+	s.play.Invalidate(slug)
 	raw, _ := manifest.Encode(p)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
