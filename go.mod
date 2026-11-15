@@ -1,6 +1,6 @@
 module github.com/usherf233/adks
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/glebarez/sqlite v1.11.0
