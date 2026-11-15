@@ -20,6 +20,9 @@ type statLine struct {
 	Slug      string    `json:"slug"`
 	SessionID string    `json:"sessionId"`
 	UserID    string    `json:"userId,omitempty"`
+	// Kind is "eval" for a regression run. Those lines stay in the file so the cost
+	// is still visible with grep, but they are not part of the project's account.
+	Kind string `json:"kind,omitempty"`
 	TurnStats
 }
 
@@ -118,6 +121,9 @@ func (s *Service) Stats(slug string, limit int) (StatsSummary, error) {
 		var row statLine
 		if err := json.Unmarshal(raw, &row); err != nil {
 			// One truncated line (a crash mid-write) must not void the account.
+			continue
+		}
+		if row.Kind == "eval" {
 			continue
 		}
 		sum.Turns++

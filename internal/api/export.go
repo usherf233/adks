@@ -34,7 +34,7 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request) {
 		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
-	b, err := codegen.Render(p, s.seed)
+	b, err := s.render(slug, p)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -108,7 +108,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 		writeLoadErr(w, err, http.StatusBadRequest)
 		return
 	}
-	b, err := codegen.Render(p, s.seed)
+	b, err := s.render(slug, p)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -175,7 +175,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	b, err := codegen.Render(p, s.seed)
+	b, err := s.render(slug, p)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -236,4 +236,21 @@ func validateForExport(p *manifest.Project) error {
 		}
 	}
 	return nil
+}
+
+// render builds the export bundle and adds the project's regression cases.
+//
+// Preview, verify and export all go through here so the three cannot disagree
+// about what ships: a project that carries evals.yaml in the zip but not in the
+// preview would be a surprise at exactly the wrong moment.
+func (s *Server) render(slug string, p *manifest.Project) (*codegen.Bundle, error) {
+	b, err := codegen.Render(p, s.seed)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := s.store.LoadEvals(slug)
+	if err == nil && len(raw) > 0 {
+		b.Files["evals.yaml"] = raw
+	}
+	return b, nil
 }

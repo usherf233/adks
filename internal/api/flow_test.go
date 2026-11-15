@@ -179,6 +179,11 @@ func TestExportZipCarriesLauncherFlags(t *testing.T) {
 	if w := call(t, s, http.MethodPut, "/api/projects/flags", mustJSON(t, map[string]string{"manifestYaml": string(raw)})); w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
+	// A shipped project carries its own checks, so the zip has to include them.
+	evals := "cases:\n  - name: smoke\n    input: 你好\n    expect: {contains: [你好]}\n"
+	if w := call(t, s, http.MethodPut, "/api/projects/flags/evals", mustJSON(t, map[string]string{"yaml": evals})); w.Code != http.StatusOK {
+		t.Fatalf("save evals: %d %s", w.Code, w.Body.String())
+	}
 
 	w := call(t, s, http.MethodPost, "/api/projects/flags/export", `{"zip":true}`)
 	if w.Code != http.StatusOK {
@@ -205,6 +210,11 @@ func TestExportZipCarriesLauncherFlags(t *testing.T) {
 	}
 	if _, ok := files["agent.yaml"]; !ok {
 		t.Error("archive has no agent.yaml")
+	}
+	if got, ok := files["evals.yaml"]; !ok {
+		t.Error("archive did not carry the regression cases")
+	} else if !strings.Contains(got, "smoke") {
+		t.Errorf("evals.yaml in the archive is not the saved file:\n%s", got)
 	}
 	if _, ok := files["kit/build.go"]; !ok {
 		t.Error("archive did not copy kit/ verbatim")
@@ -358,5 +368,54 @@ func TestStatsEndpoint(t *testing.T) {
 	sum := decode[play.StatsSummary](t, w)
 	if sum.Turns != 0 || sum.Tools == nil {
 		t.Fatalf("empty account = %+v", sum)
+	}
+}
+
+// TestEvalsEndpoints covers the regression-case editor: read, validate, save.
+// Running them needs a live model, so the execution path is tested in the play
+// package against a fake runner.
+func TestEvalsEndpoints(t *testing.T) {
+	s := flowServer(t)
+	defer s.Close()
+	if w := call(t, s, http.MethodPost, "/api/projects", `{"slug":"demo","name":"Demo"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+
+	empty := decode[struct {
+		YAML  string          `json:"yaml"`
+		Cases []play.EvalCase `json:"cases"`
+	}](t, call(t, s, http.MethodGet, "/api/projects/demo/evals", ""))
+	if empty.YAML != "" || len(empty.Cases) != 0 {
+		t.Fatalf("a new project should have no cases: %+v", empty)
+	}
+
+	// A case that asserts nothing can only pass, so saving it is refused.
+	bad := mustJSON(t, map[string]string{"yaml": "cases:\n  - name: a\n    input: hi\n"})
+	if w := call(t, s, http.MethodPut, "/api/projects/demo/evals", bad); w.Code != http.StatusBadRequest {
+		t.Fatalf("saving an assertion-free case: %d %s", w.Code, w.Body.String())
+	}
+
+	good := mustJSON(t, map[string]string{"yaml": "cases:\n  - name: refund\n    input: 查订单 A1\n    expect: {toolsUsed: [lookup], contains: [A1]}\n"})
+	if w := call(t, s, http.MethodPut, "/api/projects/demo/evals", good); w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+
+	back := decode[struct {
+		YAML  string          `json:"yaml"`
+		Cases []play.EvalCase `json:"cases"`
+	}](t, call(t, s, http.MethodGet, "/api/projects/demo/evals", ""))
+	if len(back.Cases) != 1 || back.Cases[0].Name != "refund" {
+		t.Fatalf("cases did not round-trip: %+v", back)
+	}
+	if !strings.Contains(back.YAML, "refund") {
+		t.Fatalf("the raw file was not returned verbatim: %q", back.YAML)
+	}
+
+	// Running with nothing to run is a bad request, not an empty success.
+	if w := call(t, s, http.MethodPost, "/api/projects", `{"slug":"plain","name":"Plain"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create plain: %d", w.Code)
+	}
+	if w := call(t, s, http.MethodPost, "/api/projects/plain/evals/run", `{}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("run without cases: %d %s", w.Code, w.Body.String())
 	}
 }

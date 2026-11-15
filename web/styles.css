@@ -426,6 +426,10 @@ html[data-theme="light"] .tab.active { background: var(--bg-1); box-shadow: 0 1p
   font-size: 12.5px; line-height: 1.7;
   background: var(--bg-2); tab-size: 2;
 }
+#evals-input {
+  min-height: 260px; margin-bottom: 4px;
+  background: var(--bg-2); tab-size: 2;
+}
 .yaml-meta {
   flex: 0 0 auto; margin: 6px 16px 0;
   font-family: var(--mono); font-size: 10.5px; color: var(--fg-3);
@@ -731,6 +735,22 @@ html[data-theme="light"] .tab.active { background: var(--bg-1); box-shadow: 0 1p
   font-family: var(--mono); font-size: 10.5px; line-height: 1.6;
   color: var(--fg-3); cursor: help; overflow-wrap: anywhere;
 }
+
+/* Regression cases: one row per case, failures listed underneath. */
+.evals-report { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }.eval-case {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg-2); padding: 8px 10px;
+}
+.eval-case.ok { border-color: var(--ok-soft); }
+.eval-case.err { border-color: var(--err-soft); }
+.eval-line {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 11.5px;
+}
+.eval-line .mark { font-weight: 600; }
+.eval-case.ok .mark { color: var(--ok); }
+.eval-case.err .mark { color: var(--err); }
+.eval-fails { margin: 6px 0 0; padding-left: 18px; font-size: 11.5px; color: var(--err); }
 .tool-call.ok { border-color: var(--ok-soft); }
 .tool-call.err { border-color: var(--err-soft); }
 

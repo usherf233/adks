@@ -83,6 +83,7 @@
           <button data-tab="form" class="tab active" type="button">配置</button>
           <button data-tab="yaml" class="tab" type="button">YAML</button>
           <button data-tab="export" class="tab" type="button">导出</button>
+          <button data-tab="evals" class="tab" type="button">回归</button>
           <button data-tab="versions" class="tab" type="button">版本</button>
         </div>
         <div class="head-actions">
@@ -112,6 +113,26 @@
           </div>
           <textarea id="yaml-input" spellcheck="false" wrap="off"></textarea>
           <div class="yaml-meta" id="yaml-meta"></div>
+        </div>
+
+        <div class="tab-pane" data-pane="evals" hidden>
+          <div class="editor-note">
+            <strong>只断言事实。</strong>给定输入，断言该调的工具调了、不该调的没调、回答里有什么。
+            不请模型给自己打分——判断不可复现就不算校验。<code>approve</code> 里没列出的工具，评测时一律拒绝执行。
+          </div>
+          <div class="row" style="margin-bottom:8px">
+            <button class="btn" id="btn-evals-save" type="button">保存用例</button>
+            <button class="btn primary" id="btn-evals-run" type="button">运行回归</button>
+            <span class="muted" id="evals-state"></span>
+          </div>
+          <textarea id="evals-input" spellcheck="false" wrap="off" placeholder="cases:
+  - name: 查订单要调工具
+    input: 帮我查订单 A1
+    expect:
+      toolsUsed: [get_order]
+      contains: [A1]
+"></textarea>
+          <div id="evals-report" class="evals-report"></div>
         </div>
 
         <div class="tab-pane" data-pane="export" hidden>

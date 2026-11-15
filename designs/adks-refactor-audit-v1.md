@@ -261,3 +261,56 @@ MCP stdio 执行 manifest 里的任意命令，且不做白名单；HTTP 工具�
 - `internal/play/stats_test.go`：跨轮聚合（含 p50/p95 的具体值）、缺文件返回空账、坏行跳过
 - `TestStatsEndpoint`：新项目返回空账；404 规则测试里补了 `/stats`
 - **端到端实测**：起真服务、手工写 3 行 stats.jsonl、`curl` 端点，核对轮数/命中率 0.743/p50 3200/p95 5100/工具降序全部正确
+
+---
+
+## 11. 第六轮：第三层验证——行为回归（2026-11-15 深夜）
+
+前五轮把"能跑通"和"能看见账"补齐了。这一层回答的是另一个问题：**改一句 instruction，怎么知道是改好了还是改坏了。**
+
+### 11.1 只断言事实
+
+`evals.yaml` 的每条用例是「一个输入 + 一组可判定的期望」：
+
+```yaml
+cases:
+  - name: 查订单必须调工具
+    input: 帮我查订单 A1
+    expect:
+      toolsUsed: [get_order]      # 必须被调用过
+      toolsNotUsed: [cancel_order] # 必须没被调用
+      contains: [A1]               # 最终回答里必须有
+      notContains: [失败]           # 必须没有
+    approve: [cancel_order]        # 允许自动确认的工具，默认全部拒绝
+```
+
+**没有模型打分。** 判断不可复现就不算校验——这条从第一轮起就没变过，回归层也一样。
+
+### 11.2 三个安全/正确性判断
+
+1. **默认拒绝破坏性工具的自动确认**。用例要跑副作用，必须在 `approve` 里写出来。写下来才可能被 review。
+2. **每条用例一个独立 session**（`eval_<nanos>_<i>`）。共用 session 会让后一条用例靠前一条制造的上下文通过——那是假通过。
+3. **用例轮次不进项目账**。statLine 加了 `kind: eval`，`Stats()` 聚合时跳过；成本仍留在文件里可 grep，但"这个项目花了多少"只算人真的聊的那些轮。
+
+### 11.3 落点
+
+| 位置 | 内容 |
+|---|---|
+| `internal/play/eval.go` | 用例类型、`ParseEvals`（拒绝无输入/无断言/重名）、`RunEvals`、`checkExpect` |
+| `internal/store/evals.go` | `evals.yaml` 的项目内读写（与 agent.yaml 同级） |
+| `internal/api/evals.go` | `GET/PUT /api/projects/{slug}/evals`、`POST .../evals/run` |
+| `internal/api/export.go` | 新增 `s.render()`：预览、verify、导出三处统一，`evals.yaml` 一起进产物 |
+| `web/` | 「回归」标签页：YAML 编辑 + 保存 + 运行 + 逐条结果 |
+
+`ParseEvals` 会拒绝"断言为空的用例"——那种用例永远通过，是回归集里最危险的东西。
+
+### 11.4 验证
+
+- `play/eval_test.go`：解析拒绝规则、四种断言的正反两面（失败信息必须报出"实际调了哪些工具"）、默认拒绝确认、`approve` 生效、结果带成本
+- `api/flow_test.go`：用例增删查 + 断言为空的用例拒收 + 空套件运行返回 400 + **导出 zip 里确实带 evals.yaml**
+- 端到端：真服务上保存两条中文用例、读回、导出 zip 解包确认 `evals.yaml` 在内、页面出现「回归」标签
+
+### 11.5 已知边界
+
+- 运行是同步的，用例多会等很久；上限 20 条
+- 没有"历史通过率"曲线，也没有 CI 钩子——导出物里有用例文件，但还没有 `adks eval` 子命令在导出目录里跑

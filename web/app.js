@@ -1382,6 +1382,84 @@ async function refreshTally() {
   }
 }
 
+// ---- 回归用例 ----
+// 只断言事实：工具是否被调用、回答里有没有某段文字。运行一次就是一次真实的
+// 模型调用，所以按钮会在运行期间锁住，避免连点连烧。
+
+function setEvalsState(text, isErr) {
+  const el = $('#evals-state');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('err', !!isErr);
+}
+
+async function loadEvals() {
+  const box = $('#evals-input');
+  if (!box || !state.slug) return;
+  try {
+    const data = await call('GET', `/api/projects/${encodeURIComponent(state.slug)}/evals`);
+    // Do not overwrite what the user is typing when the tab is re-entered.
+    if (document.activeElement !== box) box.value = data.yaml || '';
+    if (data.error) setEvalsState(`解析失败：${data.error}`, true);
+    else if (data.cases && data.cases.length) setEvalsState(`${data.cases.length} 条用例`);
+    else setEvalsState('还没有用例');
+  } catch (e) {
+    setEvalsState('读取失败', true);
+  }
+}
+
+async function saveEvals() {
+  if (!state.slug) return;
+  try {
+    const res = await call('PUT', `/api/projects/${encodeURIComponent(state.slug)}/evals`, {
+      yaml: $('#evals-input').value,
+    });
+    setEvalsState(`${(res.cases || []).length} 条用例 · 已保存`);
+    toast('用例已保存');
+  } catch (e) {
+    setEvalsState(`保存失败：${e.message}`, true);
+  }
+}
+
+async function runEvals() {
+  if (!state.slug) return;
+  const btn = $('#btn-evals-run');
+  btn.disabled = true;
+  setEvalsState('运行中…');
+  try {
+    const rep = await call('POST', `/api/projects/${encodeURIComponent(state.slug)}/evals/run`, {
+      yaml: $('#evals-input').value,
+    });
+    renderEvalReport(rep);
+    setEvalsState(
+      `${rep.passed}/${rep.total} 通过 · ${(rep.durMs / 1000).toFixed(1)}s`,
+      rep.passed !== rep.total,
+    );
+  } catch (e) {
+    setEvalsState(`运行失败：${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderEvalReport(rep) {
+  const box = $('#evals-report');
+  if (!box) return;
+  const rows = (rep.cases || []).map((c) => {
+    const mark = c.ok ? '✓' : '✗';
+    const cls = c.ok ? 'ok' : 'err';
+    const tools = (c.tools || []).length ? `工具：${c.tools.join(', ')}` : '工具：无';
+    const cost = c.stats ? ` · ${c.stats.llmCalls} 次调用 · ↑${fmtTokens(c.stats.promptTokens)} ↓${fmtTokens(c.stats.outputTokens)}` : '';
+    const fails = (c.failures || []).map((f) => `<li>${esc(f)}</li>`).join('');
+    return `<div class="eval-case ${cls}">
+      <div class="eval-line"><span class="mark">${mark}</span><span>${esc(c.name)}</span>
+        <span class="muted">${tools}${cost}</span></div>
+      ${fails ? `<ul class="eval-fails">${fails}</ul>` : ''}
+    </div>`;
+  });
+  box.innerHTML = rows.join('');
+}
+
 // renderTurnStats is the turn's account: what it cost and what it felt like.
 // Every number is measured by the server, never estimated.
 function renderTurnStats(wrap, st) {
@@ -1734,6 +1812,7 @@ function showTab(tab) {
   $$('.tab-pane').forEach((p) => { p.hidden = p.dataset.pane !== tab; });
   if (tab === 'export') loadFiles();
   if (tab === 'versions') renderVersions();
+  if (tab === 'evals') loadEvals();
   if (tab === 'yaml') { $('#yaml-input').value = state.yaml; updateYamlMeta(); }
 }
 
@@ -1806,6 +1885,8 @@ function bindGlobal() {
   $('#btn-verify').onclick = runVerify;
   $('#btn-export-dir').onclick = exportDir;
   $('#btn-export-zip').onclick = exportZip;
+  $('#btn-evals-save').onclick = saveEvals;
+  $('#btn-evals-run').onclick = runEvals;
 
   $$('#tabs .tab').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
   $('#yaml-input').addEventListener('input', () => { markDirty(); updateYamlMeta(); });

@@ -193,6 +193,9 @@ type Session struct {
 	release   func()
 	statsPath string
 	stats     *statSink
+	// kind is "eval" for a regression run, empty for a human turn. It keeps the
+	// project's running account free of cases the user did not type.
+	kind string
 }
 
 // WallClock is the budget for the whole turn, from the manifest's policy.
@@ -405,6 +408,7 @@ func (s *Session) recordStats(req Request, st *TurnStats) {
 		Slug:      s.slug,
 		SessionID: req.SessionID,
 		UserID:    req.UserID,
+		Kind:      s.kind,
 		TurnStats: *st,
 	})
 }
