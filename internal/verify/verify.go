@@ -115,9 +115,40 @@ func smoke(ctx context.Context, dir string) Check {
 		return fail("build binary: " + strings.TrimSpace(string(out)))
 	}
 
-	port, err := freePort()
-	if err != nil {
-		return fail(err.Error())
+	// freePort closes its listener before the child binds, so another process can
+	// take the port in that gap. On a loaded CI runner it happens often enough to
+	// matter, and the symptom is indistinguishable from a crash unless the stderr
+	// text is inspected. Retry only on a bind conflict, with a fresh port: a binary
+	// that genuinely fails to start must still be reported as broken.
+	const attempts = 3
+	var last Check
+	for attempt := 0; attempt < attempts; attempt++ {
+		port, err := nextPort()
+		if err != nil {
+			return fail(err.Error())
+		}
+		chk, conflict := serveOnce(ctx, bin, dir, port)
+		if chk.OK || !conflict || attempt == attempts-1 {
+			chk.DurMs = time.Since(start).Milliseconds()
+			return chk
+		}
+		last = chk
+		// Give the kernel a moment to release the port to whoever else took it.
+		select {
+		case <-ctx.Done():
+			return fail("timed out")
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+	return last
+}
+
+// serveOnce starts the binary on one port and waits for /health. The second return
+// value reports a bind conflict, which is the one failure worth retrying.
+func serveOnce(ctx context.Context, bin, dir string, port int) (Check, bool) {
+	start := time.Now()
+	fail := func(detail string) Check {
+		return Check{Name: "smoke run", Kind: "smoke", OK: false, Detail: clip(detail), DurMs: time.Since(start).Milliseconds()}
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -132,7 +163,7 @@ func smoke(ctx context.Context, dir string) Check {
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr
 	if err := cmd.Start(); err != nil {
-		return fail(err.Error())
+		return fail(err.Error()), false
 	}
 
 	// One goroutine owns Wait; the checks below watch its channel. Calling Wait
@@ -156,7 +187,6 @@ func smoke(ctx context.Context, dir string) Check {
 			select {
 			case <-exited:
 			case <-time.After(3 * time.Second):
-			case <-ctx.Done():
 			}
 		}
 	}()
@@ -180,7 +210,7 @@ func smoke(ctx context.Context, dir string) Check {
 			if detail == "" {
 				detail = "the binary exited before serving"
 			}
-			return fail("process exited during start-up: " + detail)
+			return fail("process exited during start-up: " + detail), isBindConflict(detail)
 		default:
 		}
 		resp, err := client.Get(url)
@@ -191,17 +221,31 @@ func smoke(ctx context.Context, dir string) Check {
 					Name: "smoke run", Kind: "smoke", OK: true,
 					Detail: fmt.Sprintf("GET /health on port %d", port),
 					DurMs:  time.Since(start).Milliseconds(),
-				}
+				}, false
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return fail("timed out")
+			return fail("timed out"), false
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
-	return fail("server did not answer /health within 20s: " + strings.TrimSpace(stderr.String()))
+	return fail("server did not answer /health within 20s: " + strings.TrimSpace(stderr.String())), false
 }
+
+// isBindConflict recognises the three ways an OS says "that port is taken": the
+// Linux/macOS message, the Windows one, and Go's syscall name.
+func isBindConflict(detail string) bool {
+	for _, hint := range []string{"address already in use", "Only one usage of each socket address", "EADDRINUSE"} {
+		if strings.Contains(detail, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// nextPort is a seam: the retry test has to force a conflict on the first attempt.
+var nextPort = freePort
 
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
