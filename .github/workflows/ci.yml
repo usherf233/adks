@@ -49,15 +49,19 @@ jobs:
 
       - name: go test
         shell: bash
-        # 失败时把测试名打成 annotation：Actions 的原始日志要鉴权才能读，而
-        # annotation 走 API 就能取到，PR 上也能直接看到是哪条挂了。
+        # 失败时把关键行和日志尾部打成 annotation：Actions 的原始日志要鉴权才能读，
+        # 而 annotation 走 API 就能取到。只 grep "--- FAIL" 不够——包编译失败、
+        # 进程被杀、go 自身报错都不会产生那一行。
         run: |
           set -o pipefail
           go test -race -count=1 ./... 2>&1 | tee test.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            grep -E '^(--- FAIL|FAIL|panic:)' test.log | head -30 | while IFS= read -r line; do
+            grep -E '^(# |--- FAIL|FAIL|panic:)' test.log | head -20 | while IFS= read -r line; do
               echo "::error title=go test::${line}"
+            done
+            tail -12 test.log | while IFS= read -r line; do
+              echo "::error title=go test tail::${line}"
             done
           fi
           exit "$status"
