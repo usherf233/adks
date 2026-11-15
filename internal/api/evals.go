@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/usherf233/adks/internal/play"
 	"github.com/usherf233/adks/internal/store"
+	"github.com/usherf233/adks/kit"
 )
 
 // evals returns the project's regression cases as text, so the editor can show
@@ -21,7 +21,7 @@ func (s *Server) evals(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	suite, perr := play.ParseEvals(raw)
+	suite, perr := kit.ParseEvals(raw)
 	resp := map[string]any{"yaml": string(raw)}
 	if perr != nil {
 		// A broken file must not be a 500: the editor needs to show the parse error
@@ -44,7 +44,7 @@ func (s *Server) saveEvals(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	suite, err := play.ParseEvals([]byte(req.YAML))
+	suite, err := kit.ParseEvals([]byte(req.YAML))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -84,13 +84,13 @@ func (s *Server) runEvals(w http.ResponseWriter, r *http.Request) {
 		}
 		raw = stored
 	}
-	suite, err := play.ParseEvals(raw)
+	suite, err := kit.ParseEvals(raw)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	if len(suite.Cases) == 0 {
-		writeErr(w, http.StatusBadRequest, play.ErrNoEvals)
+		writeErr(w, http.StatusBadRequest, kit.ErrNoCases)
 		return
 	}
 	report, err := s.play.RunEvals(r.Context(), slug, suite)

@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
 	"sort"
 	"strings"
 	"time"
 
 	"google.golang.org/adk/v2/agent"
-	"google.golang.org/adk/v2/runner"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 	"google.golang.org/genai"
@@ -187,7 +185,7 @@ type Request struct {
 // cache reference that keeps the MCP connections and session database alive.
 type Session struct {
 	slug      string
-	rnr       runnerLike
+	rnr       kit.Runner
 	project   *manifest.Project
 	hub       *playHub
 	release   func()
@@ -282,12 +280,6 @@ func (s *Session) Converse(ctx context.Context, req Request, send func(Event)) {
 	finish()
 }
 
-// runnerLike is the slice of *runner.Runner this file needs, which keeps runTurn
-// testable without a live model.
-type runnerLike interface {
-	Run(ctx context.Context, userID, sessionID string, msg *genai.Content, cfg agent.RunConfig, opts ...runner.RunOption) iter.Seq2[*session.Event, error]
-}
-
 type pendingConfirm struct {
 	CallID string
 	Tool   string
@@ -311,7 +303,7 @@ func (s *Session) runTurn(ctx context.Context, req Request, content *genai.Conte
 		delete(started, callID)
 		return time.Since(t).Milliseconds()
 	}
-	var rnr runnerLike = s.rnr
+	var rnr kit.Runner = s.rnr
 	for ev, err := range rnr.Run(ctx, req.UserID, req.SessionID, content, agent.RunConfig{StreamingMode: agent.StreamingModeNone}) {
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {

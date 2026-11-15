@@ -156,3 +156,27 @@ func TestConsoleModeIgnoresWebFlags(t *testing.T) {
 		t.Fatalf("console mode does not return a bare keyword:\n%s", main)
 	}
 }
+
+// TestGeneratedMainWiresEval keeps the self-check reachable: the archive carries
+// evals.yaml, so the binary it builds has to be able to run it. A generated main.go
+// that silently lost -eval would ship a project that can only be checked from the
+// builder that made it.
+func TestGeneratedMainWiresEval(t *testing.T) {
+	b, err := Render(manifest.New("demo", "Demo"), os.DirFS("../.."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := string(b.Files["main.go"])
+	for _, want := range []string{
+		`os.Args[1] == "-eval"`,
+		`kit.ParseEvals`,
+		`kit.RunEvals`,
+		`ADKS_EVALS`,
+		`return 1`,
+		`return 2`,
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("generated main.go lost %q", want)
+		}
+	}
+}

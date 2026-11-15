@@ -373,3 +373,48 @@ trim 失败就**保持原样，下一轮再试**：账本丢一行比多占几�
 - `TestStatSinkTrimKeepsFileReadable`：trim 后每一行仍能 `json.Unmarshal`
 - `TestStatSinkConcurrentWritesStayWhole`：4 个 goroutine × 50 次写入叠加 trim，逐行解析无损坏
 - `TestStatsReadsWhatSurvivedTrim`：读端口在 trim 之后的文件上仍然给出正确的轮数与 token 合计
+
+---
+
+## 14. 第九轮：让导出物能自己跑用例（`agent -eval`）
+
+上一轮把用例放进了导出包，但只有 builder 能跑它——"工程自带检查"还是空话。这一轮把裁判逻辑搬到 `kit`，导出物就能自己判自己。
+
+### 14.1 为什么是 kit
+
+导出物只带走 `kit` 和 `manifest`。所以用例的类型、解析、断言、运行循环都必须住在 `kit`；builder 的 `internal/play` 退化成驱动器：编译项目、跑一次、把数字映射成面板读的形状。
+
+**裁判只有一份**，两边不可能给出不同结论。这正是前八轮反复在修的东西（声明与实现分家）。
+
+### 14.2 一处真实的健壮性漏洞（端到端测出来的）
+
+第一次 e2e 时，我用 `printf` 写了个坏 YAML，文件内容成了 `cases:/n  - input: hi`（`\n` 被 shell 层转义坏了）。结果二进制打印 **"no eval cases" 并 exit 0**。
+
+追下去发现是真 bug：`yaml.v3` 把顶层是标量的文档解码进 struct 时**不报错**，于是"根本不是用例文件"被当成"0 条用例"，CI 会绿。这正是我在评审里最反感的那种假绿。
+
+修法：先解成 `yaml.Node`，检查根节点必须是 mapping、`cases` 必须是 sequence，再 Decode。两条测试锁定。
+
+> 方法论备注：这个 bug 是被"故意构造坏输入跑一遍"发现的，不是读代码发现的。退化输入的 e2e 比正常路径的 e2e 值钱。
+
+### 14.3 CLI 契约
+
+```
+./agent -eval                  # 读 ./evals.yaml
+ADKS_EVALS=other.yaml ./agent -eval
+```
+
+退出码：`0` 全过或无用例、`1` 有用例失败、`2` 跑不起来（文件坏 / 无法构建 / 无凭证）。
+
+`-eval` 分支放在构建 layer **之前**处理：检查"有没有用例"不该需要模型凭证。
+
+### 14.4 实测的五条路径
+
+| 场景 | 输出 | 退出码 |
+|---|---|---|
+| 没有 evals.yaml | `no eval cases: evals.yaml does not exist` | 0 |
+| 顶层不是映射 | `expected a mapping with a cases: list` | 2 |
+| 用例断言为空 | `asserts nothing, so it can only pass` | 2 |
+| 合法用例、无凭证 | `build agent: ... GOOGLE_API_KEY is empty` | 2 |
+| 合法用例、假凭证 | `FAIL 必须调工具` + 两条失败原因 + `0/1 passed in 11100ms` | 1 |
+
+最后一条是完整链路：真构建 agent、真调模型（这里网络不通）、把失败原因逐条打出来。

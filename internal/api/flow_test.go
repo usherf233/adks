@@ -12,6 +12,7 @@ import (
 
 	"github.com/usherf233/adks/internal/play"
 	"github.com/usherf233/adks/internal/store"
+	"github.com/usherf233/adks/kit"
 	"github.com/usherf233/adks/manifest"
 )
 
@@ -382,8 +383,8 @@ func TestEvalsEndpoints(t *testing.T) {
 	}
 
 	empty := decode[struct {
-		YAML  string          `json:"yaml"`
-		Cases []play.EvalCase `json:"cases"`
+		YAML  string         `json:"yaml"`
+		Cases []kit.EvalCase `json:"cases"`
 	}](t, call(t, s, http.MethodGet, "/api/projects/demo/evals", ""))
 	if empty.YAML != "" || len(empty.Cases) != 0 {
 		t.Fatalf("a new project should have no cases: %+v", empty)
@@ -401,8 +402,8 @@ func TestEvalsEndpoints(t *testing.T) {
 	}
 
 	back := decode[struct {
-		YAML  string          `json:"yaml"`
-		Cases []play.EvalCase `json:"cases"`
+		YAML  string         `json:"yaml"`
+		Cases []kit.EvalCase `json:"cases"`
 	}](t, call(t, s, http.MethodGet, "/api/projects/demo/evals", ""))
 	if len(back.Cases) != 1 || back.Cases[0].Name != "refund" {
 		t.Fatalf("cases did not round-trip: %+v", back)

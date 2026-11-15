@@ -80,7 +80,7 @@ func respEvent(name string, id string, resp map[string]any) *session.Event {
 // newTestSession builds a Session with no compiled layer, which is enough for
 // everything except Prepare. The slug and hub must agree with what the tests
 // deliver decisions against.
-func newTestSession(r runnerLike) *Session {
+func newTestSession(r kit.Runner) *Session {
 	return &Session{slug: testSlug, rnr: r, hub: newPlayHub()}
 }
 
@@ -89,7 +89,7 @@ const (
 	testSession = "s"
 )
 
-func collect(t *testing.T, r runnerLike) ([]Event, []pendingConfirm, error) {
+func collect(t *testing.T, r kit.Runner) ([]Event, []pendingConfirm, error) {
 	t.Helper()
 	var got []Event
 	s := newTestSession(r)

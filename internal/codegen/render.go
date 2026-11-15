@@ -287,12 +287,14 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"google.golang.org/adk/v2/cmd/launcher/full"
+	"google.golang.org/adk/v2/runner"
 	"google.golang.org/adk/v2/server/authn"
 
 	"` + ModulePath + `/kit"
@@ -335,6 +337,13 @@ func main() {
 		log.Printf("agent.yaml: %s", issue)
 	}
 
+	// -eval runs the project's regression cases and exits, so the exported repo can
+	// check itself in CI without a browser. It is handled before the layer is built:
+	// "there is nothing to run" must not require a model credential.
+	if len(os.Args) > 1 && (os.Args[1] == "-eval" || os.Args[1] == "--eval") {
+		os.Exit(runEvals(ctx, p))
+	}
+
 	layer, err := kit.BuildWith(ctx, p, kit.Options{AuditPath: auditPath(p)})
 	if err != nil {
 		log.Fatalf("build agent: %v", err)
@@ -372,6 +381,83 @@ func main() {
 		}
 		log.Fatalf("run: %v\n\n%s", err, l.CommandLineSyntax())
 	}
+}
+
+// runEvals executes evals.yaml and returns a process exit code: 0 when every case
+// passed or there is nothing to run, 1 when a case failed, 2 when the suite could
+// not be carried out. A CI that only checks the exit code therefore fails on a
+// regression, not on a bad path.
+func runEvals(ctx context.Context, p *manifest.Project) int {
+	path := os.Getenv("ADKS_EVALS")
+	if path == "" {
+		path = "evals.yaml"
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("no eval cases: %s does not exist\n", path)
+			return 0
+		}
+		fmt.Fprintf(os.Stderr, "read %s: %v\n", path, err)
+		return 2
+	}
+	suite, err := kit.ParseEvals(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 2
+	}
+	if kit.NoCases(suite) {
+		fmt.Printf("no eval cases in %s\n", path)
+		return 0
+	}
+
+	layer, err := kit.BuildWith(ctx, p, kit.Options{AuditPath: auditPath(p)})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build agent: %v\n", err)
+		return 2
+	}
+	// runEvals returns before main exits, so this defer does run; closing here keeps
+	// the MCP child processes from outliving a failing suite.
+	defer func() {
+		if err := layer.Close(ctx); err != nil {
+			log.Printf("close: %v", err)
+		}
+	}()
+
+	rnr, err := runner.New(runner.Config{
+		AppName:           kit.AppName(p),
+		Agent:             layer.Agent,
+		SessionService:    layer.Session,
+		ArtifactService:   layer.Artifact,
+		MemoryService:     layer.Memory,
+		PluginConfig:      layer.Plugins,
+		AutoCreateSession: true,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create runner: %v\n", err)
+		return 2
+	}
+
+	rep, err := kit.RunEvals(ctx, rnr, suite, kit.EvalOptions{SessionPrefix: "eval"})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "run evals: %v\n", err)
+		return 2
+	}
+	for _, c := range rep.Cases {
+		mark := "PASS"
+		if !c.OK {
+			mark = "FAIL"
+		}
+		fmt.Printf("%s  %s\n", mark, c.Name)
+		for _, f := range c.Failures {
+			fmt.Printf("      - %s\n", f)
+		}
+	}
+	fmt.Printf("\n%d/%d passed in %dms\n", rep.Passed, rep.Total, rep.DurMs)
+	if rep.Passed != rep.Total {
+		return 1
+	}
+	return 0
 }
 
 // defaultArgs turns the manifest's server section into launcher arguments.
