@@ -60,10 +60,17 @@ jobs:
             grep -o '"Action":"fail"[^}]*}' test.json | head -8 | while IFS= read -r line; do
               echo "::error title=go test fail::${line}"
             done
+            # 编译错误的原文在最前面，FAIL 摘要最后面；两头都要抓，否则只看到
+            # "build failed" 而看不到到底哪一行错。Go 1.24 起编译错误走
+            # "build-output" 而不是 "output"，两个都要匹配。
+            grep -oE '"Action":"(output|build-output)"[^}]*"Output":"[^"]*"' test.json \
+              | grep -Ei 'undefined|cannot|error:|not found|address already|build failed' \
+              | head -6 | sed 's/\\n/ | /g' | while IFS= read -r line; do
+              echo "::error title=go test reason::${line}"
+            done
             grep -o '"Action":"output"[^}]*"Output":"[^"]*"' test.json \
-              | grep -Ei 'FAIL|Error|error:|undefined|not found|address already' \
-              | tail -8 | sed 's/\\n/ | /g' | while IFS= read -r line; do
-              echo "::error title=go test output::${line}"
+              | grep -E 'FAIL' | tail -4 | sed 's/\\n/ | /g' | while IFS= read -r line; do
+              echo "::error title=go test summary::${line}"
             done
           fi
           exit "$status"
