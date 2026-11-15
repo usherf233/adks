@@ -71,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/projects/{slug}/play", s.playTurn)
 	mux.HandleFunc("POST /api/projects/{slug}/play/confirm", s.confirm)
+	mux.HandleFunc("GET /api/projects/{slug}/stats", s.projectStats)
 
 	mux.HandleFunc("GET /api/projects/{slug}/files", s.files)
 	mux.HandleFunc("POST /api/projects/{slug}/verify", s.verify)

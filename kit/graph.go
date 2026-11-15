@@ -142,6 +142,7 @@ func (b *graphBuilder) agentNode(spec manifest.NodeSpec, cfg workflow.NodeConfig
 		// and the audit sink accumulate across the whole graph rather than
 		// resetting per step.
 		BeforeModelCallbacks: NewLimitCallbacks(b.p.Spec.Policy.Limits),
+		AfterModelCallbacks:  NewTokenBudgetCallbacks(b.p.Spec.Policy.Limits),
 		BeforeToolCallbacks:  []llmagent.BeforeToolCallback{NewLoopGuard()},
 		AfterToolCallbacks:   NewAuditCallbacks(b.sink),
 	})

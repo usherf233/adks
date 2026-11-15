@@ -238,6 +238,7 @@ async function openProject(slug) {
     renderVersions();
     renderProjectHead();
     renderProjects();
+    refreshTally();
     setSaveState(data.loadError ? '解析失败' : '已加载', data.loadError ? 'error' : '');
     if (data.loadError) {
       toast('这个项目的 YAML 无法解析，已切到 YAML 标签页', true);
@@ -1347,6 +1348,40 @@ function fmtTokens(n) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
+// refreshTally renders the project's running account above the chat.
+//
+// It reads the same file each turn appends to, so this line and the one under a
+// finished turn can never disagree. A project that has never run simply shows
+// nothing.
+async function refreshTally() {
+  const box = $('#play-tally');
+  if (!box) return;
+  if (!state.slug) {
+    box.hidden = true;
+    return;
+  }
+  try {
+    const s = await call('GET', `/api/projects/${encodeURIComponent(state.slug)}/stats`);
+    if (!s || !s.turns) {
+      box.hidden = true;
+      return;
+    }
+    const bits = [
+      `累计 ${s.turns} 轮`,
+      `↑${fmtTokens(s.promptTokens)} ↓${fmtTokens(s.outputTokens)} tok`,
+    ];
+    if (s.cacheHitRate) bits.push(`缓存 ${Math.round(s.cacheHitRate * 100)}%`);
+    if (s.wallMs && s.wallMs.p50) bits.push(`p50 ${(s.wallMs.p50 / 1000).toFixed(1)}s`);
+    if (s.wallMs && s.wallMs.p95) bits.push(`p95 ${(s.wallMs.p95 / 1000).toFixed(1)}s`);
+    if (s.errTurns) bits.push(`${s.errTurns} 轮失败`);
+    box.textContent = bits.join(' · ');
+    box.title = JSON.stringify(s);
+    box.hidden = false;
+  } catch (e) {
+    box.hidden = true;
+  }
+}
+
 // renderTurnStats is the turn's account: what it cost and what it felt like.
 // Every number is measured by the server, never estimated.
 function renderTurnStats(wrap, st) {
@@ -1512,6 +1547,7 @@ function handleEvent(ev, bubble) {
         state.turnStart = 0;
       }
       if (wrap && ev.stats) renderTurnStats(wrap, ev.stats);
+      refreshTally();
       break;
     }
   }

@@ -137,6 +137,7 @@ func BuildWith(ctx context.Context, p *manifest.Project, opts Options) (*Layer, 
 			Tools:                 tools,
 			Toolsets:              toolsets,
 			BeforeModelCallbacks:  NewLimitCallbacks(p.Spec.Policy.Limits),
+			AfterModelCallbacks:   NewTokenBudgetCallbacks(p.Spec.Policy.Limits),
 			BeforeToolCallbacks:   []llmagent.BeforeToolCallback{NewLoopGuard()},
 			AfterToolCallbacks:    NewAuditCallbacks(sink),
 		}

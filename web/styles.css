@@ -725,6 +725,12 @@ html[data-theme="light"] .tab.active { background: var(--bg-1); box-shadow: 0 1p
   color: var(--fg-3); cursor: help;
   overflow-wrap: anywhere;
 }
+/* The project's running account, pinned above the chat. */
+.tally {
+  padding: 6px 12px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.6;
+  color: var(--fg-3); cursor: help; overflow-wrap: anywhere;
+}
 .tool-call.ok { border-color: var(--ok-soft); }
 .tool-call.err { border-color: var(--err-soft); }
 

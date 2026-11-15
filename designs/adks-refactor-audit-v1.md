@@ -222,3 +222,42 @@ MCP stdio 执行 manifest 里的任意命令，且不做白名单；HTTP 工具�
 
 - 账目只有单轮，没有跨轮聚合（"这个项目最近 50 轮平均多少 token"）。要做就得给 stats.jsonl 加一个读端口，属于第 ③ 层的前置。
 - 没有"成本预算"：`policy.limits` 只限调用数与墙钟，没有 token 上限。
+
+---
+
+## 10. 第五轮：把账读出来，把预算接上（2026-11-15 深夜）
+
+上一轮的账只存在于单轮与文件里：能看见"这一轮花了多少"，看不见"这个项目到底花了多少"，也不能阻止一轮烧穿。
+
+### 10.1 token 预算：为什么放在 kit 而不是 builder
+
+`policy.limits.maxTokensPerTurn`（0 = 不限制）用 `AfterModelCallbacks` 在 `kit` 里实现，而不是在 play 的循环里判断：
+
+- 导出物不走 `Converse`，走 ADK launcher。放在 builder 里就会变成"试跑能拦、上线不能拦"——正是前四轮反复在修的那类字段。
+- 计数器用 `temp:adks.tokens`，与 `maxLlmCalls` 同一个 `temp:` 约定（ADK 不会把它持久化），所以作用域是"这一次 invocation"，graph 模式下所有节点共享同一个计数。
+- 计数只认 provider 报的 usage。没报 usage 的模型不加猜测——猜出来的 token 数会把健康的 run 掐死。
+- 独立错误 `ErrTokenBudget`，UI 映射成 `TOKEN_BUDGET`，与 `WALL_CLOCK` 区分：一个是"调太多了"，一个是"跑太久了"，指向的修法不同。
+- 顺带核实了一件事：`stateKeyLLMCalls` 早就在用 `temp:` 前缀，所以"20 次调用"确实是**每轮**而不是整个会话——这条怀疑被证伪，没改。
+
+### 10.2 读端口：`GET /api/projects/{slug}/stats`
+
+`play.Stats(slug, limit)` 读 `stats.jsonl`，只取尾部 2000 行（文件只增不减，全量解析会让面板越用越慢），聚合出：
+
+- 轮数、失败轮数、输入/输出/缓存 token、**缓存命中率**（`cached/prompt`，唯一能证明前缀稳定真在省钱的数）
+- 墙钟与首字的 p50 / p95 / avg
+- 每个工具的调用数、错误数、累计耗时、p50，按耗时降序
+
+细节取舍：截断的坏行（写一半崩了）跳过而不作废整份账；文件不存在返回空账而不是 404——项目存在，只是没跑过。
+
+### 10.3 UI
+
+- 对话上方一行累计账：`累计 3 轮 · ↑3.5k ↓550 tok · 缓存 74% · p50 3.2s · p95 5.1s · 1 轮失败`
+- 每次 `done` 后自动刷新；切换项目时刷新
+- 悬停给完整 JSON
+
+### 10.4 验证
+
+- `kit/tokenbudget_test.go`：未设置不装回调、跨调用累计、thinking token 计入、无 usage/报错时不误杀
+- `internal/play/stats_test.go`：跨轮聚合（含 p50/p95 的具体值）、缺文件返回空账、坏行跳过
+- `TestStatsEndpoint`：新项目返回空账；404 规则测试里补了 `/stats`
+- **端到端实测**：起真服务、手工写 3 行 stats.jsonl、`curl` 端点，核对轮数/命中率 0.743/p50 3200/p95 5100/工具降序全部正确

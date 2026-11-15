@@ -22,7 +22,7 @@
 
 `adks` 是一个**单二进制**的 [Google ADK for Go](https://google.golang.org/adk) 脚手架。启动后是一个本地 Web 界面，你在里面选模型、写指令、挂工具、连数据库，然后：
 
-- **试跑** —— 流式对话，工具调用要你点确认才执行；每轮结束给一行**实测账**：LLM 调用数、输入/输出 token（含缓存命中）、首字延迟、每个工具的耗时，工具的返回体可直接展开看，不用去翻审计日志；账目同时追加到 `~/.adks/projects/<slug>/.runtime/stats.jsonl`；
+- **试跑** —— 流式对话，工具调用要你点确认才执行；每轮结束给一行**实测账**：LLM 调用数、输入/输出 token（含缓存命中）、首字延迟、每个工具的耗时，工具的返回体可直接展开看，不用去翻审计日志；对话上方还有一行**累计账**（轮数、token、缓存命中率、p50/p95），数据来自 `GET /api/projects/<slug>/stats`，原始记录追加在 `~/.adks/projects/<slug>/.runtime/stats.jsonl`；
 - **验证** —— `build` / `vet` / 冷启动三项确定性检查，全绿才放行；
 - **导出** —— 拿到一个完整的 Go module，`go run .` 就能跑，不依赖本工具。
 
@@ -129,7 +129,7 @@ go run . console                    # 终端聊天，不开浏览器
 | **模型** | Gemini / OpenAI / Anthropic；OpenAI 兼容端点可用 `baseURL`（留空回退 `OPENAI_BASE_URL`） |
 | **工具** | 内置工具、HTTP 工具（域名白名单 + 响应体积上限）、MCP server（仅本地命令或回环地址）、tool search |
 | **存储** | SQLite / MySQL / Postgres；会话、记忆、artifact 分别可选后端 |
-| **安全** | 破坏性工具需人工确认、单次运行限额（LLM 调用数 / 墙钟 / 工具并发 / 指令体积） |
+| **安全** | 破坏性工具需人工确认、单次运行限额（LLM 调用数 / 墙钟 / 工具并发 / 指令体积 / **token 预算**） |
 | **插件** | ADK 插件引用、回调、审计日志 |
 | **运行时** | 监听 host/port（host 可用 `ADKS_HOST` 覆盖）、`pathPrefix` 改写 REST 前缀、`a2a` 端点、健康检查、打包 Dockerfile |
 

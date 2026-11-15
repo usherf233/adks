@@ -21,6 +21,9 @@ import (
 var (
 	// ErrLLMLimit means the per-run model call budget ran out.
 	ErrLLMLimit = errors.New("llm call limit reached")
+	// ErrTokenBudget is separate from ErrLLMLimit so the UI can say which budget
+	// ran out: "too many calls" and "too many tokens" point at different fixes.
+	ErrTokenBudget = errors.New("token budget exhausted")
 	// ErrLoopDetected means the model repeated the same tool call too often.
 	ErrLoopDetected = errors.New("repeated identical tool call")
 )
@@ -29,6 +32,7 @@ var (
 // the scope of a per-run counter.
 const (
 	stateKeyLLMCalls  = "temp:adks.llm_calls"
+	stateKeyTokens    = "temp:adks.tokens"
 	stateKeyLoopLast  = "temp:adks.loop.last"
 	stateKeyLoopCount = "temp:adks.loop.count"
 )
@@ -58,6 +62,46 @@ func NewLimitCallbacks(lim manifest.LimitsSpec) []llmagent.BeforeModelCallback {
 				return nil, fmt.Errorf("%w: %d calls in one turn", ErrLLMLimit, maxCalls)
 			}
 			return nil, ctx.State().Set(stateKeyLLMCalls, used+1)
+		},
+	}
+}
+
+// NewTokenBudgetCallbacks enforces policy.limits.maxTokensPerTurn.
+//
+// It lives here rather than in the builder because the exported binary runs the
+// same loop: a limit only the trial run honours would be one more field declared
+// in the manifest and silently ignored in production.
+//
+// Counting uses the provider's own usage metadata. A model that reports no usage
+// therefore cannot be budgeted — the check simply never fires, which is better
+// than estimating tokens and stopping a healthy run.
+func NewTokenBudgetCallbacks(lim manifest.LimitsSpec) []llmagent.AfterModelCallback {
+	budget := lim.MaxTokensPerTurn
+	if budget <= 0 {
+		return nil
+	}
+	return []llmagent.AfterModelCallback{
+		func(ctx agent.Context, resp *model.LLMResponse, respErr error) (*model.LLMResponse, error) {
+			if respErr != nil || resp == nil || resp.UsageMetadata == nil {
+				return nil, nil
+			}
+			u := resp.UsageMetadata
+			used := 0
+			if v, err := ctx.State().Get(stateKeyTokens); err == nil {
+				if n, ok := v.(int); ok {
+					used = n
+				}
+			}
+			used += int(u.PromptTokenCount + u.CandidatesTokenCount + u.ThoughtsTokenCount)
+			if err := ctx.State().Set(stateKeyTokens, used); err != nil {
+				// A state failure must not end the run: the next call re-reads a
+				// stale count and the budget is simply looser for one turn.
+				return nil, nil
+			}
+			if used > budget {
+				return nil, fmt.Errorf("%w: %d tokens in one turn (budget %d)", ErrTokenBudget, used, budget)
+			}
+			return nil, nil
 		},
 	}
 }

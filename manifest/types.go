@@ -266,8 +266,12 @@ type PolicySpec struct {
 
 // LimitsSpec bounds a single run.
 type LimitsSpec struct {
-	MaxLLMCalls         int `yaml:"maxLlmCalls,omitempty" json:"maxLlmCalls,omitempty"`
-	MaxWallClockSec     int `yaml:"maxWallClockSec,omitempty" json:"maxWallClockSec,omitempty"`
-	MaxToolConcurrency  int `yaml:"maxToolConcurrency,omitempty" json:"maxToolConcurrency,omitempty"`
+	MaxLLMCalls        int `yaml:"maxLlmCalls,omitempty" json:"maxLlmCalls,omitempty"`
+	MaxWallClockSec    int `yaml:"maxWallClockSec,omitempty" json:"maxWallClockSec,omitempty"`
+	MaxToolConcurrency int `yaml:"maxToolConcurrency,omitempty" json:"maxToolConcurrency,omitempty"`
+	// MaxTokensPerTurn stops a turn once the provider has billed more than this
+	// many tokens (prompt + output + thoughts). Zero means unlimited. It is
+	// enforced by a model callback, so the exported binary honours it too.
+	MaxTokensPerTurn    int `yaml:"maxTokensPerTurn,omitempty" json:"maxTokensPerTurn,omitempty"`
 	MaxInstructionBytes int `yaml:"maxInstructionBytes,omitempty" json:"maxInstructionBytes,omitempty"`
 }

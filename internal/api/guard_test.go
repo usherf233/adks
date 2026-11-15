@@ -161,6 +161,7 @@ func TestMissingProjectIs404OnEveryEndpoint(t *testing.T) {
 		{"POST", "/api/projects/ghost/probe/model", `{}`},
 		{"POST", "/api/projects/ghost/verify", `{}`},
 		{"GET", "/api/projects/ghost/files", ""},
+		{"GET", "/api/projects/ghost/stats", ""},
 	} {
 		var body *strings.Reader
 		if tc.body == "" {

@@ -437,6 +437,8 @@ func waitDecision(ctx context.Context, ch chan bool, timeout time.Duration) (boo
 // codeFor maps an error to the code the UI shows.
 func codeFor(err error) string {
 	switch {
+	case errors.Is(err, kit.ErrTokenBudget):
+		return "TOKEN_BUDGET"
 	case errors.Is(err, kit.ErrLLMLimit):
 		return "WALL_CLOCK"
 	case errors.Is(err, kit.ErrLoopDetected):

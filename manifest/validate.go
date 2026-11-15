@@ -432,6 +432,12 @@ func validatePolicy(v *Validator, p *Project) {
 	if lim.MaxToolConcurrency < 1 {
 		v.errf("spec.policy.limits.maxToolConcurrency", "must be at least 1")
 	}
+	if lim.MaxTokensPerTurn < 0 {
+		v.errf("spec.policy.limits.maxTokensPerTurn", "must not be negative; leave it unset for unlimited")
+	}
+	if lim.MaxTokensPerTurn > 0 && lim.MaxTokensPerTurn < 500 {
+		v.warnf("spec.policy.limits.maxTokensPerTurn", "%d tokens is below a normal system prompt; most turns will stop at their first reply", lim.MaxTokensPerTurn)
+	}
 }
 
 func validatePlugins(v *Validator, p *Project) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/usherf233/adks/internal/play"
 	"github.com/usherf233/adks/internal/store"
 	"github.com/usherf233/adks/manifest"
 )
@@ -338,4 +339,24 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestStatsEndpoint is the read side of the account. A fresh project answers with
+// an empty account rather than a 404: the endpoint describes a project, and the
+// project exists.
+func TestStatsEndpoint(t *testing.T) {
+	s := flowServer(t)
+	defer s.Close()
+	if w := call(t, s, http.MethodPost, "/api/projects", `{"slug":"demo","name":"Demo"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+
+	w := call(t, s, http.MethodGet, "/api/projects/demo/stats", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("stats: %d %s", w.Code, w.Body.String())
+	}
+	sum := decode[play.StatsSummary](t, w)
+	if sum.Turns != 0 || sum.Tools == nil {
+		t.Fatalf("empty account = %+v", sum)
+	}
 }

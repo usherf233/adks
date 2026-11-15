@@ -230,3 +230,89 @@ func TestDoneEventWireShape(t *testing.T) {
 		}
 	}
 }
+
+// TestStatsAggregatesAcrossTurns is the read side of the account: totals,
+// percentiles and per-tool sums over the turns still on disk.
+func TestStatsAggregatesAcrossTurns(t *testing.T) {
+	svc := newService(t)
+	defer svc.Close()
+	path := filepath.Join(svc.st.RuntimeDir("demo"), "stats.jsonl")
+
+	rows := []statLine{
+		{TurnStats: TurnStats{LLMCalls: 2, PromptTokens: 100, OutputTokens: 20, CachedTokens: 80, WallMs: 100, FirstByteMs: 40,
+			Tools: []ToolStat{{Name: "lookup", Calls: 1, DurMs: 30}}}},
+		{TurnStats: TurnStats{LLMCalls: 1, PromptTokens: 300, OutputTokens: 10, WallMs: 200, FirstByteMs: 60,
+			Tools: []ToolStat{{Name: "lookup", Calls: 2, Errors: 1, DurMs: 90}}}},
+		{TurnStats: TurnStats{LLMCalls: 1, WallMs: 300, ErrCode: "WALL_CLOCK",
+			Tools: []ToolStat{{Name: "search", Calls: 1, DurMs: 500}}}},
+		{TurnStats: TurnStats{LLMCalls: 1, WallMs: 400}},
+	}
+	for _, r := range rows {
+		svc.stats.write(path, r)
+	}
+
+	sum, err := svc.Stats("demo", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Turns != 4 || sum.ErrTurns != 1 {
+		t.Fatalf("turns = %d, errors = %d, want 4 and 1", sum.Turns, sum.ErrTurns)
+	}
+	if sum.PromptTokens != 400 || sum.OutputTokens != 30 || sum.CachedTokens != 80 {
+		t.Fatalf("tokens = %d/%d cached %d", sum.PromptTokens, sum.OutputTokens, sum.CachedTokens)
+	}
+	if got := sum.CacheHitRate; got < 0.19 || got > 0.21 {
+		t.Fatalf("cache hit rate = %v, want 80/400", got)
+	}
+	// walls 100,200,300,400 -> p50 200, p95 400, avg 250
+	if sum.WallMs.P50 != 200 || sum.WallMs.P95 != 400 || sum.WallMs.Avg != 250 {
+		t.Fatalf("wall = %+v, want p50 200 p95 400 avg 250", sum.WallMs)
+	}
+	if len(sum.Tools) != 2 || sum.Tools[0].Name != "search" {
+		t.Fatalf("tools = %+v, want search first (slowest)", sum.Tools)
+	}
+	var lookup ToolSummary
+	for _, ts := range sum.Tools {
+		if ts.Name == "lookup" {
+			lookup = ts
+		}
+	}
+	if lookup.Calls != 3 || lookup.Errors != 1 || lookup.DurMs != 120 {
+		t.Fatalf("lookup = %+v, want 3 calls / 1 error / 120ms", lookup)
+	}
+}
+
+// TestStatsOnMissingFileIsEmpty: a project that never ran is not an error.
+func TestStatsOnMissingFileIsEmpty(t *testing.T) {
+	svc := newService(t)
+	defer svc.Close()
+	sum, err := svc.Stats("never-ran", 0)
+	if err != nil {
+		t.Fatalf("missing stats must not error: %v", err)
+	}
+	if sum.Turns != 0 || sum.Tools == nil {
+		t.Fatalf("empty account = %+v", sum)
+	}
+}
+
+// TestStatsSkipsTruncatedLines: a crash mid-write leaves half a line, and that
+// must not void the turns that were recorded properly.
+func TestStatsSkipsTruncatedLines(t *testing.T) {
+	svc := newService(t)
+	defer svc.Close()
+	path := filepath.Join(svc.st.RuntimeDir("demo"), "stats.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"slug":"demo","llmCalls":1,"wallMs":100}` + "\n" + `{"slug":"demo","llmCa`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := svc.Stats("demo", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Turns != 1 {
+		t.Fatalf("turns = %d, want the one complete line", sum.Turns)
+	}
+}
