@@ -246,29 +246,46 @@ func hostAllowed(host string, allowed []string) bool {
 func doWithRetry(client *http.Client, req *http.Request, spec manifest.HTTPSpec) (*http.Response, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		if req.Body != nil && req.GetBody != nil {
-			if r2, e2 := req.GetBody(); e2 == nil {
-				req2 := req.Clone(req.Context())
-				req2.Body = r2
-				time.Sleep(retryDelay)
-				return client.Do(req2)
-			}
+		if retry, ok := cloneForRetry(req); ok {
+			time.Sleep(retryDelay)
+			return client.Do(retry)
 		}
 		return resp, err
 	}
-	if resp.StatusCode >= 500 && req.Body != nil && req.GetBody != nil {
-		if r2, e2 := req.GetBody(); e2 == nil {
-			// Only close the first response when we actually retry. GET/HEAD have
-			// no body to replay, and returning a response with a closed body used
-			// to make the caller's read fail with "invalid Read on closed Body".
+	if resp.StatusCode >= 500 {
+		if retry, ok := cloneForRetry(req); ok {
+			// Only close the first response when we actually retry: returning a
+			// response with a closed body makes the caller's read fail with
+			// "invalid Read on closed Body".
 			resp.Body.Close()
-			req2 := req.Clone(req.Context())
-			req2.Body = r2
 			time.Sleep(retryDelay)
-			return client.Do(req2)
+			return client.Do(retry)
 		}
 	}
 	return resp, nil
+}
+
+// cloneForRetry returns a replayable copy of req, or false when the body cannot
+// be replayed.
+//
+// The previous condition required a body to exist, which silently exempted every
+// GET and HEAD — the most common shape of an HTTP tool — from the retry it was
+// documented to get. A request with no body is trivially replayable; only a
+// bodied one needs the transport to have kept a copy.
+func cloneForRetry(req *http.Request) (*http.Request, bool) {
+	clone := req.Clone(req.Context())
+	if req.Body == nil || req.Body == http.NoBody {
+		return clone, true
+	}
+	if req.GetBody == nil {
+		return nil, false
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, false
+	}
+	clone.Body = body
+	return clone, true
 }
 
 // hostGuardTransport refuses a request whose host is not on the list. It exists
