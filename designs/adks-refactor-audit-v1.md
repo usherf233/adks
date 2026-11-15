@@ -183,3 +183,42 @@ POST /a2a/v1/invoke -> 200
 ### 8.4 一条文档缺口
 
 MCP stdio 执行 manifest 里的任意命令，且不做白名单；HTTP 工具才有 `allowedHosts`。README「已知边界」补上这条等价关系：能改 manifest = 能在这台机器上执行命令。
+
+---
+
+## 9. 第四轮：把账算出来（能看见账）
+
+前一轮的结论是"反馈只有一半"——能证明跑通，不能证明跑得对、花多少。这一轮补中间那层。
+
+### 9.1 关键发现：数据早就在代码里，只是被丢掉了
+
+- `internal/play/turn.go` 拿到 `fr.Response` 只做了 `responseOK()` 判断就丢弃；
+- `model.LLMResponse.UsageMetadata`（prompt / candidates / thoughts / cached token）每个事件都有，代码从没读过。
+
+所以这不是"新增能力"，是把已经在手的两个变量接出去。
+
+### 9.2 做法
+
+| 位置 | 改动 |
+|---|---|
+| `play.Event` | 加 `Result`（工具返回体，服务端截断 4KB，超长标 `…`）与 `Stats`（仅 done 事件携带） |
+| `play.turnMeter` | 观察同一串发给 UI 的事件，保证"报出来的账"与"用户看到的"不会漂；LLM 调用与 token 从原始 ADK 事件读取（play 事件是投影，没有 usage） |
+| `play.TurnStats` | `llmCalls / promptTokens / outputTokens / cachedTokens / wallMs / firstByteMs / tools[] / errCode` |
+| `play.statSink` | 每轮追加一行到 `.runtime/stats.jsonl`，互斥串行；**不记录消息正文** |
+| `web/app.js` | 工具卡片追加结果体（虚线分隔、可展开）；done 时渲染一行账，`title` 挂完整 JSON 便于复制 |
+
+两个刻意的取舍：
+
+1. **失败也要记账**。`errCode` 随 `done` 一起下发——"跑挂了、4 次调用、8 秒"正是最需要看见的数。
+2. **统计文件不存正文**。审计日志本来就只存参数 hash，是为了不让人格数据沉淀；账目文件同理只存数字。
+
+### 9.3 验证
+
+- `internal/play/stats_test.go`：token 聚合与工具聚合、结果体截断（含 UTF-8 边界）、stats.jsonl 落盘且不含消息正文、失败轮次的 `errCode`、首字只记一次；
+- `TestDoneEventWireShape` 钉住 SSE 字段名——前端没有测试，这是唯一防止改 JSON key 把面板改空的闸；
+- `node --check web/app.js` 过语法；`gofmt` / `go vet` / `go test -race ./...` 全绿。
+
+### 9.4 没做的（下一次）
+
+- 账目只有单轮，没有跨轮聚合（"这个项目最近 50 轮平均多少 token"）。要做就得给 stats.jsonl 加一个读端口，属于第 ③ 层的前置。
+- 没有"成本预算"：`policy.limits` 只限调用数与墙钟，没有 token 上限。

@@ -713,6 +713,18 @@ html[data-theme="light"] .tab.active { background: var(--bg-1); box-shadow: 0 1p
   color: var(--fg-2); white-space: pre-wrap; word-break: break-word;
   max-height: 220px; overflow: auto;
 }
+/* The tool's own reply, visually distinct from the arguments above it. */
+.tool-call pre.result {
+  border-top: 1px dashed var(--line);
+  color: var(--fg-3);
+  max-height: 160px;
+}
+/* The turn's account, one muted monospace line under the message. */
+.turn-stats {
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.7;
+  color: var(--fg-3); cursor: help;
+  overflow-wrap: anywhere;
+}
 .tool-call.ok { border-color: var(--ok-soft); }
 .tool-call.err { border-color: var(--err-soft); }
 

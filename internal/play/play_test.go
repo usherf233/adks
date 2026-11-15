@@ -96,6 +96,7 @@ func collect(t *testing.T, r runnerLike) ([]Event, []pendingConfirm, error) {
 	pending, err := s.runTurn(context.Background(),
 		Request{UserID: "u", SessionID: testSession},
 		genai.NewContentFromText("hi", genai.RoleUser),
+		newTurnMeter(time.Now()),
 		func(ev Event) { got = append(got, ev) })
 	return got, pending, err
 }

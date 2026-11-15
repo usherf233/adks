@@ -1341,6 +1341,36 @@ function scrollChat() {
   c.scrollTop = c.scrollHeight;
 }
 
+// fmtTokens keeps a token count readable without hiding its magnitude.
+function fmtTokens(n) {
+  if (!n) return '0';
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+// renderTurnStats is the turn's account: what it cost and what it felt like.
+// Every number is measured by the server, never estimated.
+function renderTurnStats(wrap, st) {
+  const bits = [];
+  bits.push(`${st.llmCalls || 0} 次调用`);
+  bits.push(`↑${fmtTokens(st.promptTokens)} ↓${fmtTokens(st.outputTokens)} tok`);
+  if (st.cachedTokens) bits.push(`缓存 ${fmtTokens(st.cachedTokens)}`);
+  if (st.firstByteMs) bits.push(`首字 ${st.firstByteMs}ms`);
+  if (st.errCode) bits.push(st.errCode);
+  const tools = (st.tools || []).map((t) => {
+    const errs = t.errors ? ` /${t.errors}✗` : '';
+    return `${t.name} ${t.calls}×${errs} ${t.durMs}ms`;
+  });
+  if (tools.length) bits.push(tools.join(' · '));
+
+  const el = document.createElement('div');
+  el.className = 'turn-stats';
+  el.textContent = bits.join(' · ');
+  // The full object is one hover away, for copying into an issue.
+  el.title = JSON.stringify(st);
+  wrap.appendChild(el);
+  scrollChat();
+}
+
 function setPlayState(text) { $('#play-state').textContent = text; }
 
 async function send() {
@@ -1447,6 +1477,14 @@ function handleEvent(ev, bubble) {
           const pre = card.querySelector('pre');
           if (pre) pre.textContent += `\n\n// ${ev.code}`;
         }
+        // The tool's own reply, capped server-side. Without it the only way to see
+        // what a tool returned was to read the audit log, which stores a hash.
+        if (ev.result) {
+          const out = document.createElement('pre');
+          out.className = 'result';
+          out.textContent = ev.result;
+          card.appendChild(out);
+        }
       } else {
         const el = document.createElement('div');
         el.className = 'tool-call ' + (ok ? 'ok' : 'err');
@@ -1463,11 +1501,17 @@ function handleEvent(ev, bubble) {
       break;
     case 'done': {
       setPlayState('');
-      const who = bubble.parentElement && bubble.parentElement.querySelector('.who');
-      if (who && state.turnStart) {
-        who.textContent += ` · ${((performance.now() - state.turnStart) / 1000).toFixed(1)}s`;
+      const wrap = bubble.parentElement;
+      const who = wrap && wrap.querySelector('.who');
+      // The server measures the turn; only fall back to the local clock when it
+      // did not send an account.
+      const wallMs = ev.stats && ev.stats.wallMs;
+      if (who && (wallMs || state.turnStart)) {
+        const secs = wallMs ? wallMs / 1000 : (performance.now() - state.turnStart) / 1000;
+        who.textContent += ` · ${secs.toFixed(1)}s`;
         state.turnStart = 0;
       }
+      if (wrap && ev.stats) renderTurnStats(wrap, ev.stats);
       break;
     }
   }
