@@ -30,6 +30,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # 先跑最便宜的那条：格式漂移在 review 里没人愿意提，机器提最好。
+      # Windows runner 默认是 pwsh，这段是 bash 语法，必须显式指定。
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf 'gofmt needed on:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
       - name: go build
         run: go build ./...
 
@@ -68,3 +79,19 @@ jobs:
           done
           echo "health check timed out"
           exit 1
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 版本写死：扫描结论是要拿来当闸门的，扫描器自己不能每次跑漂一个版本。
+      # 用 go run 而不是预装动作，省掉一个需要单独信任的第三方 step。
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

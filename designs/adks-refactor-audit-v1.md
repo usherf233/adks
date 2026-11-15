@@ -152,3 +152,34 @@ POST /a2a/v1/invoke -> 200
 - `gofmt` 干净 · `go build` / `go vet` 通过 · `go test -race -count=1 ./...` 全绿
 - 测试文件随代码迁移：`api/play_test.go`、`api/cache_test.go` → `internal/play/`，并补了 `TestPlayHubRefusesForeignRun`、`TestSessionCloseReleasesOnce`、`TestPlayHubCloseDropsPending`
 - e2e：导出 → 编译 → 启动 → 探测前缀与 a2a 路由，全部用真实请求验证
+
+---
+
+## 8. 第三轮：把验证缺口补上（2026-11-15 深夜）
+
+前三轮都是"改代码"，这一轮是"让下次能被机器挡住"。
+
+### 8.1 一个真 bug：GET 从不重试
+
+`kit/tools_http.go` 的 `doWithRetry` 两个分支都要求 `req.Body != nil && req.GetBody != nil`。GET/HEAD 的 `Body` 恒为 nil，于是**最常见的一类工具完全不重试**——与函数注释 "retries once on a transient failure" 和设计文档 §13 #2「瞬时 5xx 重试一次」直接矛盾。
+
+改为 `cloneForRetry(req)`：无 body 的请求天然可重放；有 body 的才需要 `GetBody`。4 条测试锁定：GET 5xx 重试、POST 重放 body、不可重放 body 不重试、4xx 不重试。
+
+### 8.2 HTTP 主链路从 0% 覆盖到有回归
+
+`go tool cover` 曾显示 `playTurn` / `confirm` / `export` / `listProjects` / `graphViewOf` / `estimateFor` 全为 0%——只有 guard 与 404 分支有测试。这正是 `host` 能漏网的土壤：没有任何测试走过"建项目 → 改字段 → 导出"。
+
+新增 `internal/api/flow_test.go`：create → list → get（含 estimate）→ PUT YAML → 重读校验持久化与版本快照 → files 预览 → DELETE；导出走 `{"zip":true}` 并解压断言 `main.go` 的 `-host` / `port` 与 `Dockerfile` 的 `EXPOSE`；graph 端点断言 depth 与 in/out；play/confirm 的前置校验。
+
+新增 `internal/play/service_test.go`：Prepare 缺失项目即错误（404 语义的根）、Confirm 无 pending、Invalidate 未知 slug、重复 Close、WallClock 取 manifest 值。
+
+**仍未覆盖（有意）**：`probeSQL` / `probeMCP` / 真实模型轮次——需要真数据库、真 MCP server、真 key，做成测试就是把不稳定引进 CI。
+
+### 8.3 CI 补两道闸
+
+- `gofmt`：矩阵含 Windows runner，其默认 shell 不是 bash，所以该 step 显式指定了 shell
+- `govulncheck`：独立 job，版本写死 `golang.org/x/vuln@v1.9.0`（扫描器本身不该每次跑漂一个版本）
+
+### 8.4 一条文档缺口
+
+MCP stdio 执行 manifest 里的任意命令，且不做白名单；HTTP 工具才有 `allowedHosts`。README「已知边界」补上这条等价关系：能改 manifest = 能在这台机器上执行命令。

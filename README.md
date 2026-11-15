@@ -192,6 +192,7 @@ designs/           架构设计台账
 
 - 不做多 Agent 拖拽编排画布；graph 可视化只读。
 - 不做运行时多租户鉴权，只靠单个 bearer token（`ADKS_TOKEN`）。
+- **MCP stdio 会执行 manifest 里写的任意命令**（`command` / `args` 不做白名单），HTTP 工具则受 `allowedHosts` 限制。所以"能让别人改 manifest"等价于"能让别人在这台机器上执行命令"——绑非回环地址之前先想清楚这一点。
 - 不支持在 UI 里写自定义 Go 工具函数。
 - 导出工程的 `runtime.server.port` 是生成期常量，改了需重新导出；`host` 同样编译进二进制，但可用 `ADKS_HOST` 在运行期覆盖（容器部署必须设 `0.0.0.0`，否则端口映射打不到）。
 
